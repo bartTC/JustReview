@@ -58,6 +58,7 @@ struct AppCommands: Commands {
     @FocusedObject private var handle: WindowHandle?
     @AppStorage("diffMode") private var mode: DiffMode = .unified
     @AppStorage("showAllFiles") private var showAll = false
+    @AppStorage("wrapLines") private var wrapLines = true
     @AppStorage("annotationsCollapsed") private var annotationsCollapsed = false
 
     var body: some Commands {
@@ -78,6 +79,8 @@ struct AppCommands: Commands {
                 .keyboardShortcut("1")
             Button("Side by Side") { mode = .split }
                 .keyboardShortcut("2")
+            Toggle("Wrap Lines", isOn: $wrapLines)
+                .keyboardShortcut("z", modifiers: .option)
             Divider()
             Toggle("Show All Files", isOn: $showAll)
                 .keyboardShortcut("a", modifiers: [.command, .shift])

@@ -4,6 +4,7 @@ struct ContentView: View {
     @ObservedObject var model: RepoModel
     let handle: WindowHandle
     @AppStorage("diffMode") private var mode: DiffMode = .unified
+    @AppStorage("wrapLines") private var wrapLines = true
 
     var body: some View {
         // Annotations pane sits below the split view and takes real space
@@ -32,6 +33,12 @@ struct ContentView: View {
                 }
                 .pickerStyle(.segmented)
                 .help("Stacked (⌘1) / Side by side (⌘2)")
+
+                Toggle(isOn: $wrapLines) {
+                    Label("Wrap Lines", systemImage: "arrow.turn.down.left")
+                }
+                .toggleStyle(.button)
+                .help("Wrap long lines (⌥Z)")
 
                 Button { Task { await model.refresh() } } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
@@ -257,6 +264,7 @@ struct DiffDetailView: View {
     @AppStorage(FontPrefs.tabWidth) private var tabWidth = FontPrefs.defaultTabWidth
     @AppStorage(FontPrefs.lineHeight) private var lineHeight = FontPrefs.defaultLineHeight
     @AppStorage("syntaxHighlighting") private var syntaxHighlighting = true
+    @AppStorage("wrapLines") private var wrapLines = true
     @AppStorage(ThemePrefs.lightKey) private var lightTheme = ThemeStore.defaultLight
     @AppStorage(ThemePrefs.darkKey) private var darkTheme = ThemeStore.defaultDark
     @Environment(\.colorScheme) private var colorScheme
@@ -358,8 +366,15 @@ struct DiffDetailView: View {
             // A file without a diff (Show All Files) has one line-number column and no sides.
             let layout: DiffMode = change.isUnchanged ? .unified : mode
 
+            // Without wrapping: stacked content is as wide as the longest line and scrolls sideways;
+            // side-by-side keeps both halves on screen and cuts long lines off with "…".
+            let lineMode: DiffLineMode = wrapLines ? .wrap : (layout == .split ? .truncate : .scroll)
+            let codeWidth = CGFloat(diff.maxColumns) * FontPrefs.digitWidth(nsFont) + 16
+            let contentWidth = gutter * (change.isUnchanged ? 1 : 2) + 16 + codeWidth
+
+            GeometryReader { viewport in
             ScrollViewReader { proxy in
-                ScrollView {
+                ScrollView(lineMode == .scroll ? [.vertical, .horizontal] : .vertical) {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         if !diff.notes.isEmpty {
                             Text(diff.notes.joined(separator: "\n"))
@@ -384,13 +399,18 @@ struct DiffDetailView: View {
                     .environment(\.diffLinePadding, (lineHeight - 1) * size / 2)
                     .environment(\.diffLineNumberColor, theme.lineNumber.map { Color(nsColor: $0) })
                     .foregroundStyle(theme.text.map { Color(nsColor: $0) } ?? Color.primary)
+                    .environment(\.diffLineMode, lineMode)
+                    .frame(width: lineMode == .scroll ? max(viewport.size.width, contentWidth) : nil,
+                           alignment: .topLeading)
                 }
-                .id("\(change.id)|\(layout.rawValue)") // reset scroll position on file/mode change
+                .defaultScrollAnchor(.topLeading)
+                .id("\(change.id)|\(layout.rawValue)|\(wrapLines)") // reset scroll on file/mode/wrap change
                 .background(codeBackground)
                 .onAppear { scrollIfRequested(proxy, diff: diff, path: change.path, layout: layout) }
                 .onChange(of: model.scrollRequest) {
                     scrollIfRequested(proxy, diff: diff, path: change.path, layout: layout)
                 }
+            }
             }
         }
     }
@@ -451,11 +471,37 @@ private struct DiffLineNumberColorKey: EnvironmentKey {
     static let defaultValue: Color? = nil
 }
 
+/// How long diff lines are shown.
+enum DiffLineMode {
+    case wrap       // wrap onto following lines
+    case scroll     // one line, the view scrolls sideways
+    case truncate   // one line, cut off with "…" (side by side without wrapping)
+}
+
+private struct DiffLineModeKey: EnvironmentKey {
+    static let defaultValue = DiffLineMode.wrap
+}
+
+extension View {
+    /// Applies the current line mode to a line of diff text.
+    func diffLine(_ mode: DiffLineMode) -> some View {
+        lineLimit(mode == .wrap ? nil : 1)
+            .truncationMode(.tail)
+            .fixedSize(horizontal: mode == .scroll, vertical: false)
+    }
+}
+
 extension EnvironmentValues {
     /// Vertical padding above and below each diff line (from the line height setting).
     var diffLinePadding: CGFloat {
         get { self[DiffLinePaddingKey.self] }
         set { self[DiffLinePaddingKey.self] = newValue }
+    }
+
+    /// How long diff lines are shown (wrap / scroll sideways / truncate).
+    var diffLineMode: DiffLineMode {
+        get { self[DiffLineModeKey.self] }
+        set { self[DiffLineModeKey.self] = newValue }
     }
 
     /// Line number color from the syntax theme (nil = system tertiary).
@@ -507,6 +553,7 @@ private struct AnnotatableLine: ViewModifier {
 struct UnifiedRowView: View {
     @ObservedObject var model: RepoModel
     @Environment(\.diffLinePadding) private var linePadding
+    @Environment(\.diffLineMode) private var lineMode
     let path: String
     let row: UnifiedRow
     let gutter: CGFloat
@@ -526,6 +573,7 @@ struct UnifiedRowView: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 16)
                     Text(row.text)
+                        .diffLine(lineMode)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.vertical, linePadding)
@@ -598,6 +646,7 @@ struct SplitRowView: View {
 private struct SideCellView: View {
     @ObservedObject var model: RepoModel
     @Environment(\.diffLinePadding) private var linePadding
+    @Environment(\.diffLineMode) private var lineMode
     let path: String
     let rowID: Int
     let column: Int
@@ -612,6 +661,7 @@ private struct SideCellView: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 14)
                 Text(cell.text)
+                    .diffLine(lineMode)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.vertical, linePadding)

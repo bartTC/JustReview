@@ -144,6 +144,8 @@ struct RenderedDiff {
     let syntaxEnabled: Bool
     let themeName: String
     let maxLineNumber: Int
+    /// Longest displayed line, in characters (sizes the content when lines don't wrap).
+    let maxColumns: Int
     let added: Int
     let removed: Int
     let isBinary: Bool
@@ -268,7 +270,9 @@ enum DiffRenderer {
 
         return RenderedDiff(changeID: changeID, rawText: raw, unified: unified, split: split,
                             tabWidth: tabWidth, syntaxEnabled: syntaxEnabled,
-                            themeName: styler?.theme.name ?? "", maxLineNumber: maxNo, added: added, removed: removed,
+                            themeName: styler?.theme.name ?? "", maxLineNumber: maxNo,
+                            maxColumns: unified.map { $0.text.characters.count }.max() ?? 0,
+                            added: added, removed: removed,
                             isBinary: diff.isBinary, notes: diff.notes, lineTexts: lineTexts)
     }
 
