@@ -493,7 +493,8 @@ struct DiffDetailView: View {
             // side-by-side keeps both halves on screen and cuts long lines off with "…".
             let lineMode: DiffLineMode = wrapLines ? .wrap : (layout == .split ? .truncate : .scroll)
             let codeWidth = CGFloat(diff.maxColumns) * FontPrefs.digitWidth(nsFont) + 16
-            let contentWidth = gutter * (change.isUnchanged ? 1 : 2) + 16 + codeWidth
+            let column = FontPrefs.digitWidth(nsFont)
+            let contentWidth = gutter * (change.isUnchanged ? 1 : 2) + 16 + column + codeWidth
 
             GeometryReader { viewport in
             ScrollViewReader { proxy in
@@ -520,6 +521,7 @@ struct DiffDetailView: View {
                     // Line height: extra space split above/below each row, and between wrapped lines.
                     .lineSpacing((lineHeight - 1) * size)
                     .environment(\.diffLinePadding, (lineHeight - 1) * size / 2)
+                    .environment(\.diffColumnWidth, column)
                     .environment(\.diffLineNumberColor, theme.lineNumber.map { Color(nsColor: $0) })
                     .foregroundStyle(theme.text.map { Color(nsColor: $0) } ?? Color.primary)
                     .environment(\.diffLineMode, lineMode)
@@ -590,6 +592,10 @@ private struct DiffLinePaddingKey: EnvironmentKey {
     static let defaultValue: CGFloat = 0
 }
 
+private struct DiffColumnWidthKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 8
+}
+
 private struct DiffLineNumberColorKey: EnvironmentKey {
     static let defaultValue: Color? = nil
 }
@@ -615,6 +621,12 @@ extension View {
 }
 
 extension EnvironmentValues {
+    /// Width of one character column of the diff font: the gap between the +/− marker and the code.
+    var diffColumnWidth: CGFloat {
+        get { self[DiffColumnWidthKey.self] }
+        set { self[DiffColumnWidthKey.self] = newValue }
+    }
+
     /// Vertical padding above and below each diff line (from the line height setting).
     var diffLinePadding: CGFloat {
         get { self[DiffLinePaddingKey.self] }
@@ -634,13 +646,29 @@ extension EnvironmentValues {
     }
 }
 
+/// A changed line's background: stronger tint behind the line numbers and marker, lighter
+/// behind the code.
+private struct GutterBackground: View {
+    let kind: RowKind
+    let width: CGFloat
+
+    var body: some View {
+        HStack(spacing: 0) {
+            DiffStyle.gutterBackground(kind).frame(width: width)
+            DiffStyle.background(kind)
+        }
+    }
+}
+
 private struct LineNumber: View {
     let number: Int?
     let width: CGFloat
+    /// Overrides the theme's line-number color (on a changed line's tinted gutter).
+    var tint: Color? = nil
     @Environment(\.diffLineNumberColor) private var color
     var body: some View {
         Text(number.map(String.init) ?? "")
-            .foregroundStyle(color.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.tertiary))
+            .foregroundStyle(tint.map { AnyShapeStyle($0) } ?? color.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.tertiary))
             .frame(width: width, alignment: .trailing)
             .padding(.trailing, 4)
     }
@@ -676,6 +704,7 @@ private struct AnnotatableLine: ViewModifier {
 struct UnifiedRowView: View {
     @ObservedObject var model: RepoModel
     @Environment(\.diffLinePadding) private var linePadding
+    @Environment(\.diffColumnWidth) private var columnWidth
     @Environment(\.diffLineMode) private var lineMode
     let path: String
     let row: UnifiedRow
@@ -689,22 +718,25 @@ struct UnifiedRowView: View {
         } else if let key = row.key {
             let target = EditTarget(path: path, key: key, rowID: row.id, column: 0)
             VStack(spacing: 0) {
+                let numberTint = DiffStyle.gutterText(row.kind)
                 HStack(alignment: .top, spacing: 0) {
-                    if !singleNumber { LineNumber(number: row.oldNo, width: gutter) }
-                    LineNumber(number: row.newNo, width: gutter)
+                    if !singleNumber { LineNumber(number: row.oldNo, width: gutter, tint: numberTint) }
+                    LineNumber(number: row.newNo, width: gutter, tint: numberTint)
                     Text(DiffStyle.marker(row.kind))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(numberTint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.secondary))
                         .frame(width: 16)
                     Text(row.text)
                         .diffLine(lineMode)
+                        .padding(.leading, columnWidth)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.vertical, linePadding)
-                .background(DiffStyle.background(row.kind))
+                .background(GutterBackground(kind: row.kind,
+                                             width: (gutter + 4) * (singleNumber ? 1 : 2) + 16))
                 .modifier(AnnotatableLine(model: model, target: target, text: row.text))
 
                 if let note = model.annotation(path: path, key: key) {
-                    AnnotationNoteView(annotation: note, indent: gutter * (singleNumber ? 1 : 2) + 24,
+                    AnnotationNoteView(annotation: note, indent: gutter * (singleNumber ? 1 : 2) + 24 + columnWidth,
                                        onEdit: { model.editing = target },
                                        onDelete: { model.removeAnnotation(note) })
                 }
@@ -715,6 +747,7 @@ struct UnifiedRowView: View {
 
 struct SplitRowView: View {
     @ObservedObject var model: RepoModel
+    @Environment(\.diffColumnWidth) private var columnWidth
     let path: String
     let row: SplitRow
     let gutter: CGFloat
@@ -760,7 +793,7 @@ struct SplitRowView: View {
     }
 
     private func note(_ a: Annotation, column: Int) -> some View {
-        AnnotationNoteView(annotation: a, indent: gutter + 22,
+        AnnotationNoteView(annotation: a, indent: gutter + 22 + columnWidth,
                            onEdit: { model.editing = EditTarget(path: path, key: a.key, rowID: row.id, column: column) },
                            onDelete: { model.removeAnnotation(a) })
     }
@@ -769,6 +802,7 @@ struct SplitRowView: View {
 private struct SideCellView: View {
     @ObservedObject var model: RepoModel
     @Environment(\.diffLinePadding) private var linePadding
+    @Environment(\.diffColumnWidth) private var columnWidth
     @Environment(\.diffLineMode) private var lineMode
     let path: String
     let rowID: Int
@@ -778,18 +812,20 @@ private struct SideCellView: View {
 
     var body: some View {
         if let cell {
+            let numberTint = DiffStyle.gutterText(cell.kind)
             HStack(alignment: .top, spacing: 0) {
-                LineNumber(number: cell.number, width: gutter)
+                LineNumber(number: cell.number, width: gutter, tint: numberTint)
                 Text(DiffStyle.marker(cell.kind))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(numberTint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.secondary))
                     .frame(width: 14)
                 Text(cell.text)
                     .diffLine(lineMode)
+                    .padding(.leading, columnWidth)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.vertical, linePadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(DiffStyle.background(cell.kind))
+            .background(GutterBackground(kind: cell.kind, width: gutter + 4 + 14))
             .modifier(AnnotatableLine(
                 model: model,
                 target: EditTarget(path: path, key: cell.key, rowID: rowID, column: column),

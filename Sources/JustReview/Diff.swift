@@ -156,33 +156,58 @@ struct RenderedDiff {
 }
 
 enum DiffStyle {
-    static let rowOpacity = 0.13
-    static let highlightOpacity = 0.25
-    static let addedBG = Color.green.opacity(rowOpacity)
-    static let addedHL = Color.green.opacity(highlightOpacity)
-    static let removedBG = Color.red.opacity(rowOpacity)
-    static let removedHL = Color.red.opacity(highlightOpacity)
+    /// Opaque colors of a changed line: code area, line-number column (stronger), changed-word
+    /// highlight, and the text in the line-number column.
+    struct Tint {
+        let row: NSColor, gutter: NSColor, highlight: NSColor, gutterText: NSColor
+    }
+
+    static func tint(_ kind: RowKind, dark: Bool) -> Tint? {
+        switch (kind, dark) {
+        case (.added, false):
+            Tint(row: NSColor(hex: 0xE5FDE5), gutter: NSColor(hex: 0x8FD48C),
+                 highlight: NSColor(hex: 0xBDEDBE), gutterText: .white)
+        case (.removed, false):
+            Tint(row: NSColor(hex: 0xFADCD8), gutter: NSColor(hex: 0xEE9B93),
+                 highlight: NSColor(hex: 0xF4BCB5), gutterText: .white)
+        case (.added, true):
+            Tint(row: NSColor(hex: 0x1F3A25), gutter: NSColor(hex: 0x2F6A3B),
+                 highlight: NSColor(hex: 0x2E5A36), gutterText: NSColor(hex: 0xD5F2D8))
+        case (.removed, true):
+            Tint(row: NSColor(hex: 0x3D2325), gutter: NSColor(hex: 0x7A3836),
+                 highlight: NSColor(hex: 0x5C2E30), gutterText: NSColor(hex: 0xF7D9D6))
+        case (.context, _):
+            nil
+        }
+    }
+
+    /// A color that follows the view's light/dark appearance.
+    private static func dynamic(_ kind: RowKind, _ pick: @escaping (Tint) -> NSColor) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return tint(kind, dark: dark).map(pick) ?? .clear
+        })
+    }
+
     static let hunkBG = Color.accentColor.opacity(0.09)
     static let fillerBG = Color.secondary.opacity(0.06)
 
-    /// The opaque color behind a changed span (code background + row tint + span tint), used to
-    /// keep syntax colors readable on it. System green/red as resolved for the appearance.
-    static func highlightBackground(_ kind: RowKind, base: NSColor, dark: Bool) -> NSColor? {
-        let tint: NSColor
-        switch kind {
-        case .added: tint = NSColor(hex: dark ? 0x30D158 : 0x34C759)
-        case .removed: tint = NSColor(hex: dark ? 0xFF453A : 0xFF3B30)
-        case .context: return nil
-        }
-        return base.over(tint, alpha: rowOpacity).over(tint, alpha: highlightOpacity)
+    /// The color behind a changed span (the renderer knows the appearance it renders for).
+    static func highlightBackground(_ kind: RowKind, dark: Bool) -> NSColor? {
+        tint(kind, dark: dark)?.highlight
     }
 
     static func background(_ kind: RowKind) -> Color {
-        switch kind {
-        case .added: return addedBG
-        case .removed: return removedBG
-        case .context: return .clear
-        }
+        kind == .context ? .clear : dynamic(kind, \.row)
+    }
+
+    static func gutterBackground(_ kind: RowKind) -> Color {
+        kind == .context ? .clear : dynamic(kind, \.gutter)
+    }
+
+    /// Line-number/marker color on a changed line's gutter (nil = the usual line-number color).
+    static func gutterText(_ kind: RowKind) -> Color? {
+        kind == .context ? nil : dynamic(kind, \.gutterText)
     }
 
     static func marker(_ kind: RowKind) -> String {
@@ -206,8 +231,6 @@ enum DiffRenderer {
                        syntax: Syntax = .none, syntaxEnabled: Bool = false,
                        styler: ThemeStyler? = nil, dark: Bool = false) -> RenderedDiff {
         let diff = DiffParser.parse(raw)
-        let base = styler?.theme.background?.usingColorSpace(.sRGB)
-            ?? NSColor(hex: dark ? 0x1E1E1E : 0xFFFFFF)
         let lineTexts = DiffParser.lineTexts(diff)
 
         /// Syntax runs for a diff line, looked up in the file version it belongs to.
@@ -220,7 +243,7 @@ enum DiffRenderer {
             DiffRenderer.attributed(line, highlight: highlight, color: color, tokens: tokens(line),
                                     styler: styler, tabWidth: tabWidth,
                                     highlightBackground: highlight == nil ? nil
-                                        : DiffStyle.highlightBackground(line.kind == .added ? .added : .removed, base: base, dark: dark))
+                                        : DiffStyle.highlightBackground(line.kind == .added ? .added : .removed, dark: dark))
         }
         var unified: [UnifiedRow] = []
         var split: [SplitRow] = []
@@ -240,12 +263,14 @@ enum DiffRenderer {
             // and highlighting the changed span within each paired line.
             func flush() {
                 guard !rem.isEmpty || !add.isEmpty else { return }
-                var remText = rem.map { attributed($0, highlight: nil, color: DiffStyle.removedHL) }
-                var addText = add.map { attributed($0, highlight: nil, color: DiffStyle.addedHL) }
+                let removedHL = Color(nsColor: DiffStyle.highlightBackground(.removed, dark: dark) ?? .clear)
+                let addedHL = Color(nsColor: DiffStyle.highlightBackground(.added, dark: dark) ?? .clear)
+                var remText = rem.map { attributed($0, highlight: nil, color: removedHL) }
+                var addText = add.map { attributed($0, highlight: nil, color: addedHL) }
                 for i in 0..<min(rem.count, add.count) {
                     let (a, b) = changedRanges(rem[i].text, add[i].text)
-                    remText[i] = attributed(rem[i], highlight: a, color: DiffStyle.removedHL)
-                    addText[i] = attributed(add[i], highlight: b, color: DiffStyle.addedHL)
+                    remText[i] = attributed(rem[i], highlight: a, color: removedHL)
+                    addText[i] = attributed(add[i], highlight: b, color: addedHL)
                 }
                 for (i, l) in rem.enumerated() {
                     unified.append(UnifiedRow(id: unified.count, header: nil, key: key(l), kind: .removed,
