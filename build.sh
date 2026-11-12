@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-swift build -c release
+swift build -c release --product JustReview
 BIN="$(swift build -c release --show-bin-path)/JustReview"
 
 APP=build/JustReview.app
@@ -11,6 +11,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/JustReview"
 cp jrev "$APP/Contents/Resources/jrev"   # shell launcher, linked by "Install Command Line Tool…"
+cp -R Resources/queries "$APP/Contents/Resources/queries"   # tree-sitter highlight queries
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

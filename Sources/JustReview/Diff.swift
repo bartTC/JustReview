@@ -1,4 +1,5 @@
 import SwiftUI
+import Syntax
 
 // MARK: - Parsed diff
 
@@ -140,6 +141,7 @@ struct RenderedDiff {
     let unified: [UnifiedRow]
     let split: [SplitRow]
     let tabWidth: Int
+    let syntaxEnabled: Bool
     let maxLineNumber: Int
     let added: Int
     let removed: Int
@@ -175,13 +177,26 @@ enum DiffStyle {
 }
 
 enum DiffRenderer {
-    static func render(_ raw: String, changeID: String, tabWidth: Int, showHunkHeaders: Bool = true) -> RenderedDiff {
-        var diff = DiffParser.parse(raw)
+    /// Per-line syntax tokens of the old (HEAD) and new (working tree) file versions.
+    struct Syntax {
+        var old: [[TokenRun]]?
+        var new: [[TokenRun]]?
+        static let none = Syntax()
+    }
+
+    static func render(_ raw: String, changeID: String, tabWidth: Int, showHunkHeaders: Bool = true,
+                       syntax: Syntax = .none, syntaxEnabled: Bool = false) -> RenderedDiff {
+        let diff = DiffParser.parse(raw)
         let lineTexts = DiffParser.lineTexts(diff)
-        for h in diff.hunks.indices {
-            for l in diff.hunks[h].lines.indices {
-                diff.hunks[h].lines[l].text = expandTabs(diff.hunks[h].lines[l].text, width: tabWidth)
-            }
+
+        /// Syntax runs for a diff line, looked up in the file version it belongs to.
+        func tokens(_ line: DiffLine) -> [TokenRun] {
+            let (lines, number) = line.kind == .removed ? (syntax.old, line.oldNo) : (syntax.new, line.newNo)
+            guard let lines, let number, number >= 1, number <= lines.count else { return [] }
+            return lines[number - 1]
+        }
+        func attributed(_ line: DiffLine, highlight: Range<Int>?, color: Color) -> AttributedString {
+            DiffRenderer.attributed(line, highlight: highlight, color: color, tokens: tokens(line), tabWidth: tabWidth)
         }
         var unified: [UnifiedRow] = []
         var split: [SplitRow] = []
@@ -249,7 +264,7 @@ enum DiffRenderer {
         }
 
         return RenderedDiff(changeID: changeID, rawText: raw, unified: unified, split: split,
-                            tabWidth: tabWidth, maxLineNumber: maxNo, added: added, removed: removed,
+                            tabWidth: tabWidth, syntaxEnabled: syntaxEnabled, maxLineNumber: maxNo, added: added, removed: removed,
                             isBinary: diff.isBinary, notes: diff.notes, lineTexts: lineTexts)
     }
 
@@ -259,24 +274,6 @@ enum DiffRenderer {
         case .added: return LineKey(side: .added, line: line.newNo ?? 0)
         case .context: return LineKey(side: .context, line: line.newNo ?? 0)
         }
-    }
-
-    /// Expand tabs to the next tab stop (column-aware, like an editor does).
-    static func expandTabs(_ s: String, width: Int) -> String {
-        guard s.contains("\t") else { return s }
-        var out = ""
-        var col = 0
-        for ch in s {
-            if ch == "\t" {
-                let n = width - col % width
-                out += String(repeating: " ", count: n)
-                col += n
-            } else {
-                out.append(ch)
-                col += 1
-            }
-        }
-        return out
     }
 
     /// Common prefix/suffix trim: returns the differing character range in each line.
@@ -291,18 +288,41 @@ enum DiffRenderer {
         return (p..<(ac.count - s), p..<(bc.count - s))
     }
 
-    private static func attributed(_ line: DiffLine, highlight: Range<Int>?, color: Color) -> AttributedString {
-        var result: AttributedString
-        if let r = highlight, !r.isEmpty {
-            let chars = Array(line.text)
-            result = AttributedString(String(chars[..<r.lowerBound]))
-            var mid = AttributedString(String(chars[r]))
-            mid.backgroundColor = color
-            result += mid
-            result += AttributedString(String(chars[r.upperBound...]))
-        } else {
-            result = AttributedString(line.text)
+    /// Builds a display line: tabs expanded to tab stops, syntax colors, and the changed-span
+    /// background. `highlight` and token ranges are Character offsets in the raw (unexpanded) line.
+    fileprivate static func attributed(_ line: DiffLine, highlight: Range<Int>?, color: Color,
+                                       tokens: [TokenRun], tabWidth: Int) -> AttributedString {
+        // Expand tabs, remembering where each raw character lands.
+        var text = ""
+        var columns: [Int] = []
+        columns.reserveCapacity(line.text.count + 1)
+        var column = 0
+        for ch in line.text {
+            columns.append(column)
+            if ch == "\t" {
+                let n = tabWidth - column % tabWidth
+                text += String(repeating: " ", count: n)
+                column += n
+            } else {
+                text.append(ch)
+                column += 1
+            }
         }
+        columns.append(column)
+
+        var result = AttributedString(text)
+        func span(_ r: Range<Int>) -> Range<AttributedString.Index>? {
+            let lo = columns[min(max(r.lowerBound, 0), columns.count - 1)]
+            let hi = columns[min(max(r.upperBound, 0), columns.count - 1)]
+            guard lo < hi else { return nil }
+            let start = result.characters.index(result.startIndex, offsetBy: lo)
+            return start..<result.characters.index(start, offsetBy: hi - lo)
+        }
+        for run in tokens {
+            if let r = span(run.range), let c = run.token.color { result[r].foregroundColor = c }
+        }
+        if let h = highlight, let r = span(h) { result[r].backgroundColor = color }
+
         if line.noNewlineAtEnd {
             var note = AttributedString("  ⊘ no newline at end of file")
             note.foregroundColor = .secondary

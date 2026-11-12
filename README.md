@@ -32,7 +32,8 @@ The list and the diff reload automatically when files in the repository change.
 - The left pane shows the changed files as a tree. **Show All Files** (toolbar or ⇧⌘A) adds the
   unchanged files too (greyed out); selecting one shows its full content.
 - ⌘1 stacked, ⌘2 side by side, ⇧⌘R refresh (rarely needed: the repo is watched)
-- ⌘, Settings: font family/size for the file list and the diff view, line height, tab width
+- ⌘, Settings: font family/size for the file list and the diff view, line height, tab width,
+  syntax highlighting on/off
 - Click a diff line (or right-click → Add Annotation…) to annotate it; ⌘↩ saves.
   All annotations are listed in the bottom pane (fold it away with its chevron or ⌥⌘A).
   ⌘C copies them all to the clipboard as Markdown; ⌘R clears them (after confirming):
@@ -46,6 +47,26 @@ The list and the diff reload automatically when files in the repository change.
   just moved; if the line itself was changed (or is no longer in the diff) the note is dropped, on
   the assumption that it has been addressed.
 
+## Syntax highlighting
+
+Highlighting uses [Tree-sitter](https://tree-sitter.github.io) via
+[SwiftTreeSitter](https://github.com/ChimeHQ/SwiftTreeSitter). Both versions of a file (HEAD and
+working tree) are parsed in full, so multi-line strings and comments are colored correctly even
+when a hunk starts inside one.
+
+Supported: Python, JavaScript/JSX, TypeScript, TSX, JSON, CSS, HTML, Bash, Go, Rust, Swift, YAML,
+Markdown, TOML.
+
+- Grammars come in as Swift packages (pinned in `Package.swift`). Python, JavaScript, CSS and YAML
+  are vendored in `Vendor/Grammars` because their upstream `Package.swift` drops the external
+  scanner under current SwiftPM.
+- Highlight queries live in `Resources/queries/<language>.scm` and are copied into the app bundle.
+- `swift run syntax-check` verifies every grammar loads and its query compiles.
+
+To add a language: add the grammar package (or vendor it), its `highlights.scm` as
+`Resources/queries/<name>.scm`, and a case in `SyntaxLanguage` (`Sources/Syntax/Syntax.swift`).
+
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Vendored grammars and highlight queries are MIT licensed by their
+respective authors (license files are kept alongside them).

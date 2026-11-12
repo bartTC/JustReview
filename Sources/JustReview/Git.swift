@@ -130,6 +130,12 @@ enum Git {
         return changes.sorted { treeOrder($0.path, $1.path) }
     }
 
+    /// File content at the diff base (HEAD), or nil if it doesn't exist there.
+    static func show(_ path: String, in root: URL) -> String? {
+        guard let r = try? run(["show", "\(base(in: root)):\(path)"], in: root), r.status == 0 else { return nil }
+        return r.text
+    }
+
     /// Every tracked or untracked (not ignored) file in the working tree.
     static func allFiles(in root: URL) throws -> [String] {
         let r = try run(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], in: root)

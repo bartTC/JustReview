@@ -8,6 +8,7 @@ struct SettingsView: View {
     @AppStorage("diffMonospacedOnly") private var monospacedOnly = true
     @AppStorage(FontPrefs.tabWidth) private var tabWidth = FontPrefs.defaultTabWidth
     @AppStorage(FontPrefs.lineHeight) private var lineHeight = FontPrefs.defaultLineHeight
+    @AppStorage("syntaxHighlighting") private var syntaxHighlighting = true
 
     var body: some View {
         Form {
@@ -28,6 +29,7 @@ struct SettingsView: View {
                 Stepper(value: $lineHeight, in: 1.0...2.0, step: 0.1) {
                     Text("Line height: \(lineHeight, format: .number.precision(.fractionLength(1)))×")
                 }
+                Toggle("Syntax highlighting", isOn: $syntaxHighlighting)
                 Picker("Tab width", selection: $tabWidth) {
                     ForEach([2, 3, 4, 8], id: \.self) { Text("\($0) spaces").tag($0) }
                 }
@@ -46,6 +48,7 @@ struct SettingsView: View {
                         diffSize = FontPrefs.defaultDiffSize
                         tabWidth = FontPrefs.defaultTabWidth
                         lineHeight = FontPrefs.defaultLineHeight
+                        syntaxHighlighting = true
                     }
                 }
             }

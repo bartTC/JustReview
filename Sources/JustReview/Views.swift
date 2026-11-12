@@ -250,9 +250,12 @@ struct DiffDetailView: View {
     @AppStorage(FontPrefs.diffSize) private var size = FontPrefs.defaultDiffSize
     @AppStorage(FontPrefs.tabWidth) private var tabWidth = FontPrefs.defaultTabWidth
     @AppStorage(FontPrefs.lineHeight) private var lineHeight = FontPrefs.defaultLineHeight
+    @AppStorage("syntaxHighlighting") private var syntaxHighlighting = true
 
     var body: some View {
-        detail.onChange(of: tabWidth) { model.reloadDiff() }
+        detail
+            .onChange(of: tabWidth) { model.reloadDiff() }
+            .onChange(of: syntaxHighlighting) { model.reloadDiff() }
     }
 
     @ViewBuilder

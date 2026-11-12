@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Syntax
 
 enum DiffMode: String, CaseIterable {
     case split, unified
@@ -110,6 +111,22 @@ final class RepoModel: ObservableObject {
 
     func reloadDiff() { loadDiff() }
 
+    /// Highlights both whole file versions (so multi-line strings/comments are right even when a
+    /// hunk starts inside one); diff lines then pick their colors by line number.
+    nonisolated private static func syntax(for change: FileChange, in root: URL) -> DiffRenderer.Syntax {
+        guard let language = SyntaxLanguage.detect(path: change.path) else { return .none }
+        var result = DiffRenderer.Syntax()
+        if change.status != "D",
+           let data = FileManager.default.contents(atPath: root.appendingPathComponent(change.path).path) {
+            result.new = syntaxHighlighter.lineTokens(for: String(decoding: data, as: UTF8.self), language: language)
+        }
+        if !change.isUntracked, !change.isUnchanged, change.status != "A",
+           let old = Git.show(change.oldPath ?? change.path, in: root) {
+            result.old = syntaxHighlighter.lineTokens(for: old, language: language)
+        }
+        return result
+    }
+
     // MARK: Annotation persistence
 
     private var annotationsKey: String? { root.map { "annotations:" + $0.path } }
@@ -140,14 +157,17 @@ final class RepoModel: ObservableObject {
         }
         let previous = rendered
         let tabWidth = FontPrefs.currentTabWidth
+        let syntaxEnabled = UserDefaults.standard.object(forKey: "syntaxHighlighting") as? Bool ?? true
         Task {
             let result = await Task.detached { () -> RenderedDiff? in
                 let raw = (try? Git.diff(for: change, in: root)) ?? ""
                 // Unchanged since last time: keep the current rows (cheap refresh-on-focus).
                 if previous?.changeID == change.id, previous?.rawText == raw,
-                   previous?.tabWidth == tabWidth { return nil }
+                   previous?.tabWidth == tabWidth, previous?.syntaxEnabled == syntaxEnabled { return nil }
+                let syntax = syntaxEnabled ? Self.syntax(for: change, in: root) : .none
                 return DiffRenderer.render(raw, changeID: change.id, tabWidth: tabWidth,
-                                           showHunkHeaders: !change.isUnchanged)
+                                           showHunkHeaders: !change.isUnchanged,
+                                           syntax: syntax, syntaxEnabled: syntaxEnabled)
             }.value
             guard generation == diffGeneration, let result else { return }
             rendered = result
