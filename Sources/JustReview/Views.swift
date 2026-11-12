@@ -474,9 +474,7 @@ struct DiffDetailView: View {
     @ViewBuilder
     private func content(_ diff: RenderedDiff, change: FileChange) -> some View {
         if diff.isBinary {
-            ContentUnavailableView("Binary File", systemImage: "doc.zipper",
-                                   description: Text("Binary files can’t be shown as text."))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            BinaryPreview(root: model.root, change: change)
         } else if diff.unified.isEmpty {
             ContentUnavailableView("No Content Changes", systemImage: "doc",
                                    description: Text(Self.summary(diff.notes, change: change)))

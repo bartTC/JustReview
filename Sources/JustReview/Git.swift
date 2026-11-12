@@ -47,7 +47,8 @@ struct GitError: LocalizedError {
 enum Git {
     struct Output {
         let status: Int32
-        let text: String
+        let data: Data
+        var text: String { String(decoding: data, as: UTF8.self) }
     }
 
     static func run(_ args: [String], in dir: URL) throws -> Output {
@@ -71,7 +72,7 @@ enum Git {
         // Drain stdout before waiting, otherwise large diffs fill the pipe and deadlock.
         let data = out.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        return Output(status: process.terminationStatus, text: String(decoding: data, as: UTF8.self))
+        return Output(status: process.terminationStatus, data: data)
     }
 
     static func toplevel(for url: URL) throws -> URL {
@@ -132,8 +133,13 @@ enum Git {
 
     /// File content at the diff base (HEAD), or nil if it doesn't exist there.
     static func show(_ path: String, in root: URL) -> String? {
+        showData(path, in: root).map { String(decoding: $0, as: UTF8.self) }
+    }
+
+    /// The file's content at HEAD, as raw bytes (for binary files such as images).
+    static func showData(_ path: String, in root: URL) -> Data? {
         guard let r = try? run(["show", "\(base(in: root)):\(path)"], in: root), r.status == 0 else { return nil }
-        return r.text
+        return r.data
     }
 
     /// Every tracked or untracked (not ignored) file in the working tree.
