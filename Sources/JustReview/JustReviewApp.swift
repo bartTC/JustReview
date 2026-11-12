@@ -10,13 +10,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
 
-        // Dev convenience: `swift run JustReview <path>`. (`jrev` hands folders over as open events.)
-        for arg in CommandLine.arguments.dropFirst() where !arg.hasPrefix("-") {
-            var isDir: ObjCBool = false
-            if FileManager.default.fileExists(atPath: arg, isDirectory: &isDir), isDir.boolValue {
-                Task { @MainActor in WindowRouter.shared.open(URL(fileURLWithPath: arg)) }
-            }
-        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
