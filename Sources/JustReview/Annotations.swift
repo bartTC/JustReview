@@ -6,14 +6,17 @@ import SwiftUI
 struct Annotation: Identifiable, Codable, Hashable {
     var id = UUID()
     let path: String
-    var key: LineKey
+    /// The annotated line; nil for a note on the whole file.
+    var key: LineKey?
     var text: String
     /// The annotated line's content when the note was written. When the line no longer
     /// matches, the note is considered addressed and is dropped (see `validateAnnotations`).
     var lineText: String?
 
-    /// `path:6 (+)` — (+) added line, (-) removed line, nothing for an unchanged line.
+    /// `path:6 (+)` — (+) added line, (-) removed line, nothing for an unchanged line;
+    /// just `path` for a note on the whole file.
     var location: String {
+        guard let key else { return path }
         switch key.side {
         case .added: return "\(path):\(key.line) (+)"
         case .removed: return "\(path):\(key.line) (-)"
@@ -25,32 +28,37 @@ struct Annotation: Identifiable, Codable, Hashable {
 }
 
 /// Which line is being annotated, and in which column the popover should anchor
-/// (0 = stacked, 1 = left half, 2 = right half of side-by-side).
+/// (0 = stacked, 1 = left half, 2 = right half of side-by-side; -1 = the file header).
 struct EditTarget: Equatable {
     let path: String
-    let key: LineKey
+    let key: LineKey?
     let rowID: Int
     let column: Int
 }
 
 struct ScrollRequest: Equatable {
     let path: String
-    let key: LineKey
+    let key: LineKey?
     let nonce = UUID()
 }
 
 extension RepoModel {
-    func annotation(path: String, key: LineKey) -> Annotation? {
+    /// Note for the whole file being edited from the file header.
+    static func fileTarget(path: String) -> EditTarget {
+        EditTarget(path: path, key: nil, rowID: -1, column: -1)
+    }
+
+    func annotation(path: String, key: LineKey?) -> Annotation? {
         annotations.first { $0.path == path && $0.key == key }
     }
 
-    func setAnnotation(path: String, key: LineKey, text: String) {
+    func setAnnotation(path: String, key: LineKey?, text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         var list = annotations
         if let i = list.firstIndex(where: { $0.path == path && $0.key == key }) {
             if trimmed.isEmpty { list.remove(at: i) } else { list[i].text = trimmed }
         } else if !trimmed.isEmpty {
-            let lineText = rendered?.changeID == path ? rendered?.lineTexts[key] : nil
+            let lineText = key.flatMap { rendered?.changeID == path ? rendered?.lineTexts[$0] : nil }
             list.append(Annotation(path: path, key: key, text: trimmed, lineText: lineText))
         }
         annotations = Self.sorted(list)
@@ -84,9 +92,9 @@ extension RepoModel {
         var drop = Set<UUID>()
         var move: [UUID: LineKey] = [:]
         for a in checked {
-            guard let lines = lineMaps[a.path], let expected = a.lineText else { continue }
-            if lines[a.key] == expected { continue }
-            let matches = lines.filter { $0.key.side == a.key.side && $0.value == expected }
+            guard let lines = lineMaps[a.path], let key = a.key, let expected = a.lineText else { continue }
+            if lines[key] == expected { continue }
+            let matches = lines.filter { $0.key.side == key.side && $0.value == expected }
             if matches.count == 1, let target = matches.first?.key,
                annotation(path: a.path, key: target) == nil {
                 move[a.id] = target
@@ -115,7 +123,7 @@ extension RepoModel {
         list.sorted {
             $0.path != $1.path
                 ? $0.path.localizedStandardCompare($1.path) == .orderedAscending
-                : $0.key.line < $1.key.line
+                : ($0.key?.line ?? 0) < ($1.key?.line ?? 0)   // file notes first
         }
     }
 

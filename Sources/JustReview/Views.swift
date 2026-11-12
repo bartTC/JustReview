@@ -283,6 +283,7 @@ struct DiffDetailView: View {
             VStack(spacing: 0) {
                 header(change)
                 Divider()
+                fileNote(change)
                 if let diff = model.rendered, diff.changeID == change.id {
                     content(diff, change: change)
                 } else {
@@ -310,11 +311,33 @@ struct DiffDetailView: View {
                 Text("+\(d.added)").foregroundStyle(.green)
                 Text("−\(d.removed)").foregroundStyle(.red)
             }
+            let target = RepoModel.fileTarget(path: change.path)
+            Button { model.editing = target } label: {
+                Image(systemName: model.annotation(path: change.path, key: nil) == nil
+                      ? "text.bubble" : "text.bubble.fill")
+            }
+            .buttonStyle(.borderless)
+            .help("Annotate this file")
+            .popover(isPresented: model.editingBinding(target), arrowEdge: .bottom) {
+                AnnotationEditor(model: model, target: target)
+            }
         }
         .lineLimit(1)
         .truncationMode(.middle)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    /// The note on the whole file, shown under the file header.
+    @ViewBuilder
+    private func fileNote(_ change: FileChange) -> some View {
+        if let note = model.annotation(path: change.path, key: nil) {
+            AnnotationNoteView(annotation: note, indent: 8,
+                               onEdit: { model.editing = RepoModel.fileTarget(path: change.path) },
+                               onDelete: { model.removeAnnotation(note) })
+                .padding(.vertical, 2)
+            Divider()
+        }
     }
 
     @ViewBuilder
@@ -392,6 +415,7 @@ struct DiffDetailView: View {
     /// Jump to an annotated line when one is picked in the annotations pane.
     private func scrollIfRequested(_ proxy: ScrollViewProxy, diff: RenderedDiff, path: String, layout: DiffMode) {
         guard let req = model.scrollRequest, req.path == path else { return }
+        guard req.key != nil else { model.scrollRequest = nil; return }   // file note: no line
         let rowID: Int? = switch layout {
         case .unified: diff.unified.first { $0.key == req.key }?.id
         case .split: diff.split.first { $0.left?.key == req.key || $0.right?.key == req.key }?.id

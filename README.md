@@ -42,6 +42,8 @@ The list and the diff reload automatically when files in the repository change.
       test
 
   `(+)` = added line, `(-)` = removed line, no suffix = unchanged line.
+- To annotate a whole file, use the speech-bubble button in the file header; it is listed as
+  `## path/to/file` (no line number).
 - Annotations are kept per repository in the app's preferences (never written into the repo).
   They are anchored to the line's content: when files change, a note follows its line if the line
   just moved; if the line itself was changed (or is no longer in the diff) the note is dropped, on
