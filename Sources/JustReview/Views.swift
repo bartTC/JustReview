@@ -421,12 +421,19 @@ struct DiffDetailView: View {
     }
 
     private func header(_ change: FileChange) -> some View {
-        HStack(spacing: 8) {
-            if let old = change.oldPath {
-                Text(old).foregroundStyle(.secondary)
-                Image(systemName: "arrow.right").foregroundStyle(.secondary)
+        let target = RepoModel.fileTarget(path: change.path)
+        return HStack(spacing: 8) {
+            // Double-clicking the name annotates the file, like the speech-bubble button.
+            HStack(spacing: 8) {
+                if let old = change.oldPath {
+                    Text(old).foregroundStyle(.secondary)
+                    Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                }
+                Text(change.path).fontWeight(.semibold)
             }
-            Text(change.path).fontWeight(.semibold)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { model.editing = target }
+            .help("Double-click to annotate this file")
             Text(change.statusDescription)
                 .font(.caption)
                 .padding(.horizontal, 6).padding(.vertical, 2)
@@ -436,7 +443,6 @@ struct DiffDetailView: View {
                 Text("+\(d.added)").foregroundStyle(.green)
                 Text("−\(d.removed)").foregroundStyle(.red)
             }
-            let target = RepoModel.fileTarget(path: change.path)
             Button { model.editing = target } label: {
                 Image(systemName: model.annotation(path: change.path, key: nil) == nil
                       ? "text.bubble" : "text.bubble.fill")
