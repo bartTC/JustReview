@@ -27,7 +27,14 @@ final class RepoModel: ObservableObject {
     @Published private(set) var unchanged: [FileChange] = []
     @Published private(set) var rendered: RenderedDiff?
     @Published var error: String?
+    /// The line (or range) whose annotation popover is open.
     @Published var editing: EditTarget?
+    /// Lines marked by clicking or dragging (to annotate together or copy).
+    @Published var mark: LineMark?
+    /// Frames of the line rows currently on screen, for finding the line under a drag.
+    var lineFrames: [LineSlot: LineFrame] = [:]
+    /// Mouse-down on a line: where a drag started, and when (for double-click detection).
+    var lineDown: (target: EditTarget, time: Date)?
     @Published var scrollRequest: ScrollRequest?
     /// Keyboard navigation between changes (⌥⌘↓/↑); handled by the diff view.
     @Published var changeJump: ChangeJump?
@@ -47,6 +54,7 @@ final class RepoModel: ObservableObject {
     @Published var selection: String? {
         didSet {
             guard oldValue != selection else { return }
+            mark = nil
             loadDiff()
         }
     }

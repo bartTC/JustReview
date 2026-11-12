@@ -530,6 +530,7 @@ struct DiffDetailView: View {
                         }
                     }
                     .font(font)
+                    .coordinateSpace(.named(DiffLines.space))
                     // Line height: extra space split above/below each row, and between wrapped lines.
                     .lineSpacing((lineHeight - 1) * size)
                     .environment(\.diffLinePadding, (lineHeight - 1) * size / 2)
@@ -541,6 +542,15 @@ struct DiffDetailView: View {
                            alignment: .topLeading)
                 }
                 .defaultScrollAnchor(.topLeading)
+                .background {
+                    // Esc unmarks the marked lines.
+                    if model.mark != nil {
+                        Button("") { model.mark = nil }
+                            .keyboardShortcut(.cancelAction)
+                            .opacity(0)
+                            .frame(width: 0, height: 0)
+                    }
+                }
                 .id("\(change.id)|\(layout.rawValue)|\(wrapLines)") // reset scroll on file/mode/wrap change
                 .background(codeBackground)
                 .onAppear {
@@ -749,30 +759,77 @@ private struct LineNumber: View {
     }
 }
 
-/// Click (or right-click → Annotate) opens the annotation popover for a line.
+/// Click marks a line, dragging marks several, double-click (or right-click → Annotate) opens
+/// the annotation popover for the marked lines.
 private struct AnnotatableLine: ViewModifier {
     @ObservedObject var model: RepoModel
     let target: EditTarget
     let text: AttributedString
     @StateObject private var hovered = Box(false)
+    @StateObject private var pressed = Box(false)
 
     func body(content: Content) -> some View {
+        let marked = model.isMarked(target)
         content
+            .overlay(Color.accentColor.opacity(marked ? 0.2 : 0).allowsHitTesting(false))
+            // Marked lines: a solid bar down the left edge.
+            .overlay(alignment: .leading) {
+                if marked { Rectangle().fill(Color.accentColor).frame(width: 5).allowsHitTesting(false) }
+            }
             .overlay(Color.primary.opacity(hovered.value ? 0.06 : 0).allowsHitTesting(false))
             .onHover { hovered.value = $0 }
             .contentShape(Rectangle())
-            .onTapGesture { model.editing = target }
+            // Remember where the line is, to find the line under the pointer while dragging.
+            .onGeometryChange(for: LineFrame.self) {
+                LineFrame(frame: $0.frame(in: .named(DiffLines.space)), target: target)
+            } action: {
+                model.lineFrames[LineSlot(rowID: target.rowID, column: target.column)] = $0
+            }
+            .onDisappear { model.lineFrames[LineSlot(rowID: target.rowID, column: target.column)] = nil }
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .named(DiffLines.space))
+                    .onChanged { drag in
+                        if !pressed.value {
+                            pressed.value = true
+                            model.lineMouseDown(target)
+                        } else if abs(drag.translation.height) > 2 || abs(drag.translation.width) > 2 {
+                            model.lineDragged(to: drag.location)
+                        }
+                    }
+                    .onEnded { _ in pressed.value = false }
+            )
             .contextMenu {
-                Button(model.annotation(path: target.path, key: target.key) == nil
-                       ? "Add Annotation…" : "Edit Annotation…") { model.editing = target }
-                Button("Copy Line") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(String(text.characters), forType: .string)
+                let annotating = marked ? (model.markedTarget ?? target) : target
+                Button(model.annotation(path: annotating.path, key: annotating.key,
+                                        endLine: annotating.endLine) == nil
+                       ? "Add Annotation…" : "Edit Annotation…") { model.annotate(at: target) }
+                if marked, model.markedTarget?.endLine != nil {
+                    Button("Copy Lines") { model.copyMarkedCode() }
+                } else {
+                    Button("Copy Line") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(String(text.characters), forType: .string)
+                    }
                 }
             }
             .popover(isPresented: model.editingBinding(target), arrowEdge: .bottom) {
-                AnnotationEditor(model: model, target: target)
+                let editing = model.editing ?? target
+                AnnotationEditor(model: model, target: editing)
+                    .id("\(editing.key?.line ?? 0)-\(editing.endLine ?? 0)")
             }
+    }
+}
+
+/// The diff's content coordinate space (line frames and drag locations).
+enum DiffLines {
+    static let space = "diffLines"
+}
+
+/// Orange bar at the left edge of a line that belongs to a range note.
+private struct RangeMarker: View {
+    let visible: Bool
+    var body: some View {
+        if visible { Rectangle().fill(Color.orange).frame(width: 3) }
     }
 }
 
@@ -808,11 +865,13 @@ struct UnifiedRowView: View {
                 .padding(.vertical, linePadding)
                 .background(GutterBackground(kind: row.kind,
                                              width: (gutter + 4) * (singleNumber ? 1 : 2) + 16))
+                .overlay(alignment: .leading) { RangeMarker(visible: model.isInRange(path: path, key: key)) }
                 .modifier(AnnotatableLine(model: model, target: target, text: row.text))
 
-                if let note = model.annotation(path: path, key: key) {
+                ForEach(model.notesEnding(path: path, key: key)) { note in
                     AnnotationNoteView(annotation: note, indent: gutter * (singleNumber ? 1 : 2) + 24 + columnWidth,
-                                       onEdit: { model.editing = target },
+                                       onEdit: { model.editing = EditTarget(path: path, key: note.key, rowID: row.id,
+                                                                            column: 0, endLine: note.endLine) },
                                        onDelete: { model.removeAnnotation(note) })
                 }
             }
@@ -849,27 +908,24 @@ struct SplitRowView: View {
     /// Notes sit under the half they belong to; an unchanged line's note spans both.
     @ViewBuilder
     private var notes: some View {
-        let left = row.left.flatMap { model.annotation(path: path, key: $0.key) }
-        let right = row.right.flatMap { model.annotation(path: path, key: $0.key) }
-        if let left, left == right {
-            note(left, column: 1)
-        } else if left != nil || right != nil {
+        let left = row.left.map { model.notesEnding(path: path, key: $0.key) } ?? []
+        let right = row.right.map { model.notesEnding(path: path, key: $0.key) } ?? []
+        if !left.isEmpty, left == right {
+            ForEach(left) { note($0, column: 1) }
+        } else if !left.isEmpty || !right.isEmpty {
             HStack(alignment: .top, spacing: 0) {
-                Group {
-                    if let left { note(left, column: 1) } else { Color.clear.frame(height: 0) }
-                }
-                .frame(maxWidth: .infinity)
-                Group {
-                    if let right { note(right, column: 2) } else { Color.clear.frame(height: 0) }
-                }
-                .frame(maxWidth: .infinity)
+                VStack(spacing: 0) { ForEach(left) { note($0, column: 1) } }
+                    .frame(maxWidth: .infinity)
+                VStack(spacing: 0) { ForEach(right) { note($0, column: 2) } }
+                    .frame(maxWidth: .infinity)
             }
         }
     }
 
     private func note(_ a: Annotation, column: Int) -> some View {
         AnnotationNoteView(annotation: a, indent: gutter + 22 + columnWidth,
-                           onEdit: { model.editing = EditTarget(path: path, key: a.key, rowID: row.id, column: column) },
+                           onEdit: { model.editing = EditTarget(path: path, key: a.key, rowID: row.id,
+                                                                column: column, endLine: a.endLine) },
                            onDelete: { model.removeAnnotation(a) })
     }
 }
@@ -901,6 +957,7 @@ private struct SideCellView: View {
             .padding(.vertical, linePadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(GutterBackground(kind: cell.kind, width: gutter + 4 + 14))
+            .overlay(alignment: .leading) { RangeMarker(visible: model.isInRange(path: path, key: cell.key)) }
             .modifier(AnnotatableLine(
                 model: model,
                 target: EditTarget(path: path, key: cell.key, rowID: rowID, column: column),

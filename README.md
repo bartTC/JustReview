@@ -11,7 +11,9 @@ of your choice.
 
 - **Everything that changed:** staged, unstaged and untracked files, shown as a tree.
 - **Stacked or side-by-side diffs** with changed words highlighted and optional line wrapping.
-- **Annotations for your LLM:** click any line, or double-click a file's name, to leave a note.
+- **Annotations for your LLM:** double-click any line, or a file's name, to leave a note.
+  Drag across several lines to mark them: double-click leaves one note for all of them
+  (`path:12-18`), ⌘C copies their code without line numbers.
   Copy all notes as Markdown with one click (or ⌘C) and paste them into the LLM of your choice:
 
   ```
@@ -52,7 +54,9 @@ Tool…** to get the `jrev` command:
 | ⇧⌘A | Show all files |
 | ⌘-click | Open a file's diff in its own window |
 | ⌥⌘A | Show or hide annotations |
-| ⌘C | Copy annotations as Markdown |
+| ⌘C | Copy the marked lines' code, or else the annotations as Markdown |
+| ⇧⌘C | Copy annotations as Markdown |
+| Esc | Unmark lines |
 | ⌘R | Clear annotations |
 | ⌘O | Open a repository |
 | ⌥⌘O | Open the file in its default app |

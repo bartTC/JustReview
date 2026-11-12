@@ -12,16 +12,37 @@ struct Annotation: Identifiable, Codable, Hashable {
     /// The annotated line's content when the note was written. When the line no longer
     /// matches, the note is considered addressed and is dropped (see `validateAnnotations`).
     var lineText: String?
+    /// Last line of a note on a range of lines (`key` is the first); same side as `key`.
+    var endLine: Int? = nil
+    /// Content of every line of a range note, checked like `lineText`.
+    var lineTexts: [String]? = nil
+    /// .added / .removed when every line of the range is one; .context for a mix.
+    var rangeSide: RowKind? = nil
 
     /// `path:6 (+)` — (+) added line, (-) removed line, nothing for an unchanged line;
-    /// just `path` for a note on the whole file.
+    /// `path:12-18 (+)` for a range; just `path` for a note on the whole file.
     var location: String {
         guard let key else { return path }
-        switch key.side {
-        case .added: return "\(path):\(key.line) (+)"
-        case .removed: return "\(path):\(key.line) (-)"
-        case .context: return "\(path):\(key.line)"
+        let lines = endLine.map { "\(key.line)-\($0)" } ?? "\(key.line)"
+        switch endLine == nil ? key.side : (rangeSide ?? .context) {
+        case .added: return "\(path):\(lines) (+)"
+        case .removed: return "\(path):\(lines) (-)"
+        case .context: return "\(path):\(lines)"
         }
+    }
+
+    /// Whether the note is about this line (one of the lines of a range note).
+    func covers(_ other: LineKey) -> Bool {
+        guard let key else { return false }
+        guard let endLine else { return key == other }
+        return other.isOldSide == key.isOldSide && (key.line...endLine).contains(other.line)
+    }
+
+    /// Whether the note is shown under this line (a range note: under its last line).
+    func ends(at other: LineKey) -> Bool {
+        guard let key else { return false }
+        guard let endLine else { return key == other }
+        return other.isOldSide == key.isOldSide && other.line == endLine
     }
 
     var markdown: String { "## \(location)\n\(text)" }
@@ -34,6 +55,36 @@ struct EditTarget: Equatable {
     let key: LineKey?
     let rowID: Int
     let column: Int
+    /// Last line of a range (marked lines); the popover then sits at that line's row (`rowID`).
+    var endLine: Int? = nil
+
+    /// Same row and column: where the popover is anchored.
+    func sameAnchor(_ other: EditTarget) -> Bool {
+        path == other.path && rowID == other.rowID && column == other.column
+    }
+}
+
+/// Lines marked by clicking or dragging: from the line where the mouse went down to `end`.
+struct LineMark: Equatable {
+    let anchor: EditTarget
+    var end: EditTarget
+}
+
+/// A line row in the diff: its row and column (0 stacked; 1, 2 the halves of side by side).
+struct LineSlot: Hashable {
+    let rowID: Int
+    let column: Int
+}
+
+/// Where a line row is on screen (in the diff's content coordinates), and what it shows.
+struct LineFrame: Equatable {
+    let frame: CGRect
+    let target: EditTarget
+}
+
+extension LineKey {
+    /// Removed lines are numbered in the old file; added and unchanged lines in the new one.
+    var isOldSide: Bool { side == .removed }
 }
 
 struct ScrollRequest: Equatable {
@@ -48,20 +99,140 @@ extension RepoModel {
         EditTarget(path: path, key: nil, rowID: -1, column: -1)
     }
 
-    func annotation(path: String, key: LineKey?) -> Annotation? {
-        annotations.first { $0.path == path && $0.key == key }
+    func annotation(path: String, key: LineKey?, endLine: Int? = nil) -> Annotation? {
+        annotations.first { $0.path == path && $0.key == key && $0.endLine == endLine }
     }
 
-    func setAnnotation(path: String, key: LineKey?, text: String) {
+    /// Notes shown under this line: its own note and range notes ending here.
+    func notesEnding(path: String, key: LineKey) -> [Annotation] {
+        annotations.filter { $0.path == path && $0.ends(at: key) }
+    }
+
+    /// Whether the line belongs to a range note, or to the range being annotated right now.
+    func isInRange(path: String, key: LineKey) -> Bool {
+        if let editing, editing.path == path, editing.endLine != nil,
+           Annotation(path: path, key: editing.key, text: "", endLine: editing.endLine).covers(key) {
+            return true
+        }
+        return annotations.contains { $0.path == path && $0.endLine != nil && $0.covers(key) }
+    }
+
+    /// Text of a line in the shown diff: removed lines by old number, others by new number.
+    private func lineText(_ line: Int, oldSide: Bool, in texts: [LineKey: String]) -> String? {
+        oldSide ? texts[LineKey(side: .removed, line: line)]
+            : texts[LineKey(side: .added, line: line)] ?? texts[LineKey(side: .context, line: line)]
+    }
+
+    /// A range from one line to another (same file, column and side, every line in between
+    /// shown in the diff), or nil when the lines can't form one.
+    func rangeTarget(from anchor: EditTarget?, to target: EditTarget) -> EditTarget? {
+        guard let anchor, let a = anchor.key, let b = target.key, anchor.path == target.path,
+              anchor.column == target.column, a.isOldSide == b.isOldSide, a.line != b.line,
+              let texts = rendered?.changeID == target.path ? rendered?.lineTexts : nil else { return nil }
+        let (first, last) = a.line < b.line ? (anchor, target) : (target, anchor)
+        let range = first.key!.line...last.key!.line
+        guard range.allSatisfy({ lineText($0, oldSide: a.isOldSide, in: texts) != nil }) else { return nil }
+        return EditTarget(path: target.path, key: first.key, rowID: last.rowID, column: last.column,
+                          endLine: last.key!.line)
+    }
+
+    // MARK: Marked lines
+
+    /// The marked lines as something to annotate: one line, or a range.
+    var markedTarget: EditTarget? {
+        guard let mark else { return nil }
+        if mark.anchor.sameAnchor(mark.end) { return mark.anchor }
+        return rangeTarget(from: mark.anchor, to: mark.end)
+    }
+
+    func isMarked(_ target: EditTarget) -> Bool {
+        guard let marked = markedTarget, marked.path == target.path, marked.column == target.column,
+              let key = target.key else { return false }
+        return Annotation(path: marked.path, key: marked.key, text: "", endLine: marked.endLine).covers(key)
+    }
+
+    /// Code of the marked lines, without line numbers or +/- markers.
+    var markedCode: String? {
+        guard let marked = markedTarget, let key = marked.key,
+              let texts = rendered?.changeID == marked.path ? rendered?.lineTexts : nil else { return nil }
+        return (key.line...(marked.endLine ?? key.line))
+            .compactMap { lineText($0, oldSide: key.isOldSide, in: texts) }
+            .joined(separator: "\n")
+    }
+
+    func copyMarkedCode() {
+        guard let code = markedCode else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(code, forType: .string)
+    }
+
+    /// Mouse down on a line: marks it, or (second click) opens the annotation editor.
+    func lineMouseDown(_ target: EditTarget) {
+        let now = Date()
+        if let down = lineDown, down.target.sameAnchor(target),
+           now.timeIntervalSince(down.time) < NSEvent.doubleClickInterval {
+            lineDown = nil
+            annotate(at: target)
+            return
+        }
+        lineDown = (target, now)
+        // A click inside the marked lines keeps them (it may be the first click of a double-click).
+        if !isMarked(target) { mark = LineMark(anchor: target, end: target) }
+    }
+
+    /// Dragging from the line the mouse went down on: marks every line up to the one under the
+    /// pointer (lines that can't share a note with the first one are skipped).
+    func lineDragged(to location: CGPoint) {
+        guard let origin = lineDown?.target else { return }
+        lineDown?.time = .distantPast // a drag is not the first click of a double-click
+        guard let hit = lineFrames.first(where: { slot, line in
+            slot.column == origin.column && line.target.path == origin.path
+                && line.frame.minY <= location.y && location.y < line.frame.maxY
+        })?.value.target else { return }
+        if hit.sameAnchor(origin) || rangeTarget(from: origin, to: hit) != nil {
+            let marked = LineMark(anchor: origin, end: hit)
+            if mark != marked { mark = marked }
+        } else if mark?.anchor != origin {
+            mark = LineMark(anchor: origin, end: origin)
+        }
+    }
+
+    /// Annotates the marked lines when the line is one of them, otherwise just the line.
+    func annotate(at target: EditTarget) {
+        if isMarked(target), let marked = markedTarget {
+            editing = marked
+        } else {
+            mark = LineMark(anchor: target, end: target)
+            editing = target
+        }
+    }
+
+    /// A new note as it would be saved: the line's text, or for a range every line's text and
+    /// whether the lines are all added/removed (for the `(+)`/`(-)` in its location).
+    func draft(path: String, key: LineKey?, endLine: Int?, text: String) -> Annotation {
+        let texts = rendered?.changeID == path ? rendered?.lineTexts : nil
+        var note = Annotation(path: path, key: key, text: text, lineText: key.flatMap { texts?[$0] })
+        guard let key, let endLine, let texts else { return note }
+        note.endLine = endLine
+        note.lineTexts = (key.line...endLine).compactMap { lineText($0, oldSide: key.isOldSide, in: texts) }
+        let sides = Set((key.line...endLine).map { line -> RowKind in
+            if key.isOldSide { return .removed }
+            return texts[LineKey(side: .added, line: line)] != nil ? .added : .context
+        })
+        note.rangeSide = sides.count == 1 ? sides.first : .context
+        return note
+    }
+
+    func setAnnotation(path: String, key: LineKey?, endLine: Int? = nil, text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         var list = annotations
-        if let i = list.firstIndex(where: { $0.path == path && $0.key == key }) {
+        if let i = list.firstIndex(where: { $0.path == path && $0.key == key && $0.endLine == endLine }) {
             if trimmed.isEmpty { list.remove(at: i) } else { list[i].text = trimmed }
         } else if !trimmed.isEmpty {
-            let lineText = key.flatMap { rendered?.changeID == path ? rendered?.lineTexts[$0] : nil }
-            list.append(Annotation(path: path, key: key, text: trimmed, lineText: lineText))
+            list.append(draft(path: path, key: key, endLine: endLine, text: trimmed))
         }
         annotations = Self.sorted(list)
+        if key != nil { mark = nil } // the marked lines have their note now
     }
 
     /// Re-anchor annotations after the working tree changed:
@@ -91,8 +262,27 @@ extension RepoModel {
 
         var drop = Set<UUID>()
         var move: [UUID: LineKey] = [:]
+        var moveEnd: [UUID: Int] = [:]
         for a in checked {
             guard let lines = lineMaps[a.path], let key = a.key, let expected = a.lineText else { continue }
+            // Range note: every line must still match where it is, or the whole block must
+            // appear exactly once elsewhere on the same side (moved); otherwise it's dropped.
+            if let endLine = a.endLine, let texts = a.lineTexts, !texts.isEmpty {
+                func matches(at start: Int) -> Bool {
+                    texts.indices.allSatisfy { lineText(start + $0, oldSide: key.isOldSide, in: lines) == texts[$0] }
+                }
+                if matches(at: key.line) { continue }
+                let starts = lines.keys.filter { $0.isOldSide == key.isOldSide && lines[$0] == texts[0] }
+                    .map(\.line).filter(matches(at:))
+                if starts.count == 1, let start = starts.first,
+                   let startKey = lines.keys.first(where: { $0.isOldSide == key.isOldSide && $0.line == start }) {
+                    move[a.id] = startKey
+                    moveEnd[a.id] = start + (endLine - key.line)
+                } else {
+                    drop.insert(a.id)
+                }
+                continue
+            }
             if lines[key] == expected { continue }
             let matches = lines.filter { $0.key.side == key.side && $0.value == expected }
             if matches.count == 1, let target = matches.first?.key,
@@ -106,7 +296,7 @@ extension RepoModel {
 
         // Close the editor if its note was just dropped.
         if let editing, checked.contains(where: {
-            drop.contains($0.id) && $0.path == editing.path && $0.key == editing.key
+            drop.contains($0.id) && $0.path == editing.path && $0.key == editing.key && $0.endLine == editing.endLine
         }) {
             self.editing = nil
         }
@@ -115,6 +305,7 @@ extension RepoModel {
             if drop.contains(a.id) { return nil }
             var a = a
             if let key = move[a.id] { a.key = key }
+            if let end = moveEnd[a.id] { a.endLine = end }
             return a
         })
     }
@@ -165,10 +356,11 @@ extension RepoModel {
         scrollRequest = ScrollRequest(path: annotation.path, key: annotation.key)
     }
 
+    /// Popover shown at this row/column while it (or a range ending there) is being annotated.
     func editingBinding(_ target: EditTarget) -> Binding<Bool> {
         Binding(
-            get: { self.editing == target },
-            set: { if !$0, self.editing == target { self.editing = nil } }
+            get: { self.editing?.sameAnchor(target) ?? false },
+            set: { if !$0, self.editing?.sameAnchor(target) == true { self.editing = nil } }
         )
     }
 }
@@ -226,11 +418,12 @@ struct AnnotationEditor: View {
     @StateObject private var text = Box("")
     @FocusState private var focused: Bool
 
-    private var existing: Annotation? { model.annotation(path: target.path, key: target.key) }
+    private var existing: Annotation? { model.annotation(path: target.path, key: target.key, endLine: target.endLine) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(Annotation(path: target.path, key: target.key, text: "").location)
+            Text(existing?.location ?? model.draft(path: target.path, key: target.key,
+                                                  endLine: target.endLine, text: "").location)
                 .font(.callout.monospaced())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -247,7 +440,7 @@ struct AnnotationEditor: View {
             HStack {
                 if existing != nil {
                     Button("Delete", role: .destructive) {
-                        model.setAnnotation(path: target.path, key: target.key, text: "")
+                        model.setAnnotation(path: target.path, key: target.key, endLine: target.endLine, text: "")
                         model.editing = nil
                     }
                 }
@@ -255,7 +448,7 @@ struct AnnotationEditor: View {
                 Button("Cancel") { model.editing = nil }
                     .keyboardShortcut(.cancelAction)
                 Button("Save") {
-                    model.setAnnotation(path: target.path, key: target.key, text: text.value)
+                    model.setAnnotation(path: target.path, key: target.key, endLine: target.endLine, text: text.value)
                     model.editing = nil
                 }
                 .keyboardShortcut(.return, modifiers: .command)

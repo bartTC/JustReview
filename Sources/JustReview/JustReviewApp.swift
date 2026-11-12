@@ -119,8 +119,6 @@ struct AppCommands: Commands {
                 .disabled(model?.root == nil)
             Divider()
         }
-        // ⌘C copies all annotations — except while editing text (e.g. an annotation), where
-        // Cut/Copy/Paste/Select All behave as usual.
         CommandMenu("Navigate") {
             Button("Next Change") { model?.changeJump = ChangeJump(forward: true) }
                 .keyboardShortcut(.downArrow, modifiers: [.option, .command])
@@ -134,13 +132,24 @@ struct AppCommands: Commands {
                 .keyboardShortcut(.leftArrow, modifiers: [.option, .command])
                 .disabled(handle?.showsChrome == false)
         }
+        // ⌘C copies the marked lines' code, or else all annotations — except while editing text
+        // (e.g. an annotation), where Cut/Copy/Paste/Select All behave as usual.
         CommandGroup(replacing: .pasteboard) {
             Button("Cut") { send(#selector(NSText.cut(_:))) }
                 .keyboardShortcut("x")
             Button("Copy") {
-                if isEditingText { send(#selector(NSText.copy(_:))) } else { model?.copyAnnotations() }
+                if isEditingText {
+                    send(#selector(NSText.copy(_:)))
+                } else if model?.mark != nil {
+                    model?.copyMarkedCode()
+                } else {
+                    model?.copyAnnotations()
+                }
             }
             .keyboardShortcut("c")
+            Button("Copy Annotations") { model?.copyAnnotations() }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+                .disabled(model?.annotations.isEmpty ?? true)
             Button("Paste") { send(#selector(NSText.paste(_:))) }
                 .keyboardShortcut("v")
             Button("Select All") { send(#selector(NSText.selectAll(_:))) }
