@@ -30,9 +30,11 @@ else
 fi
 
 echo "Submitting for notarization (usually a few minutes)…"
-rm -f "$zip"
-ditto -c -k --keepParent build/JustReview.app "$zip"
-xcrun notarytool submit "$zip" "${auth[@]}" --wait
+upload="$out/.notarize.zip" # not the release zip: that only exists once notarization passed
+rm -f "$zip" "$upload"
+ditto -c -k --keepParent build/JustReview.app "$upload"
+xcrun notarytool submit "$upload" "${auth[@]}" --wait
+rm -f "$upload"
 
 xcrun stapler staple build/JustReview.app
 spctl --assess --type execute --verbose=2 build/JustReview.app
