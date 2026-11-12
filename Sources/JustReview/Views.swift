@@ -11,7 +11,7 @@ struct ContentView: View {
     /// The diff with its toolbar items. They're declared on the detail column itself so they
     /// (and the spacer pushing the buttons right) land in the detail part of the toolbar.
     private var diffView: some View {
-        DiffDetailView(model: model, mode: mode)
+        DiffDetailView(model: model, mode: mode, showsFileList: showsChrome)
             .toolbar {
                 if #available(macOS 26, *) {
                     ToolbarItem(placement: .navigation) { RepoTitle(model: model) }
@@ -389,6 +389,11 @@ struct DiffDetailView: View {
 
     private var codeBackground: Color { Color(nsColor: theme.background ?? .textBackgroundColor) }
 
+    /// The change last jumped to (per file), for ⌥⌘↓/↑.
+    @StateObject private var changeCursor = Box<(file: String, index: Int)?>(nil)
+    /// False in a file's own window: change navigation then stays within the file.
+    var showsFileList = true
+
     var body: some View {
         detail
             .onChange(of: tabWidth) { model.reloadDiff() }
@@ -410,6 +415,15 @@ struct DiffDetailView: View {
                 } else {
                     codeBackground
                 }
+            }
+            // Images, binary files and empty diffs have no changes to step through: go on to
+            // the adjacent file. (Text diffs handle the jump in their scroll view.)
+            .onChange(of: model.changeJump) {
+                guard let request = model.changeJump, let diff = model.rendered, diff.changeID == change.id,
+                      diff.isBinary || diff.unified.isEmpty else { return }
+                model.changeJump = nil
+                if showsFileList { model.selectAdjacentFile(forward: request.forward,
+                                                            landOn: request.forward ? .first : .last) }
             }
         } else {
             ContentUnavailableView("No File Selected", systemImage: "doc.text.magnifyingglass")
@@ -526,13 +540,76 @@ struct DiffDetailView: View {
                 .defaultScrollAnchor(.topLeading)
                 .id("\(change.id)|\(layout.rawValue)|\(wrapLines)") // reset scroll on file/mode/wrap change
                 .background(codeBackground)
-                .onAppear { scrollIfRequested(proxy, diff: diff, path: change.path, layout: layout) }
+                .onAppear {
+                    scrollIfRequested(proxy, diff: diff, path: change.path, layout: layout)
+                    landOnPendingChange(proxy, diff: diff, change: change, layout: layout)
+                }
                 .onChange(of: model.scrollRequest) {
                     scrollIfRequested(proxy, diff: diff, path: change.path, layout: layout)
+                }
+                .onChange(of: model.changeJump) {
+                    jump(proxy, diff: diff, change: change, layout: layout)
                 }
             }
             }
         }
+    }
+
+    // MARK: Change navigation
+
+    /// Rows where a run of changed lines starts, in the current layout.
+    private static func changeStarts(_ diff: RenderedDiff, layout: DiffMode) -> [Int] {
+        var starts: [Int] = []
+        var inChange = false
+        switch layout {
+        case .unified:
+            for row in diff.unified {
+                let changed = row.header == nil && row.kind != .context
+                if changed && !inChange { starts.append(row.id) }
+                inChange = changed
+            }
+        case .split:
+            for row in diff.split {
+                let changed = row.header == nil
+                    && !(row.left?.kind == .context && row.right?.kind == .context)
+                if changed && !inChange { starts.append(row.id) }
+                inChange = changed
+            }
+        }
+        return starts
+    }
+
+    private func scroll(_ proxy: ScrollViewProxy, to rowID: Int) {
+        DispatchQueue.main.async {
+            withAnimation { proxy.scrollTo(rowID, anchor: UnitPoint(x: 0, y: 0.2)) }
+        }
+    }
+
+    /// ⌥⌘↓/↑: the next/previous run of changes; past the last/first one, the adjacent file.
+    private func jump(_ proxy: ScrollViewProxy, diff: RenderedDiff, change: FileChange, layout: DiffMode) {
+        guard let request = model.changeJump else { return }
+        model.changeJump = nil
+        let starts = Self.changeStarts(diff, layout: layout)
+        let current = changeCursor.value?.file == change.id ? changeCursor.value?.index : nil
+        let index = request.forward ? (current.map { $0 + 1 } ?? 0) : (current ?? starts.count) - 1
+        guard starts.indices.contains(index) else {
+            if showsFileList { model.selectAdjacentFile(forward: request.forward,
+                                                        landOn: request.forward ? .first : .last) }
+            else { NSSound.beep() }
+            return
+        }
+        changeCursor.value = (change.id, index)
+        scroll(proxy, to: starts[index])
+    }
+
+    /// After moving to another file: land on its first (or last) change.
+    private func landOnPendingChange(_ proxy: ScrollViewProxy, diff: RenderedDiff, change: FileChange, layout: DiffMode) {
+        guard let anchor = model.pendingChangeAnchor else { return }
+        model.pendingChangeAnchor = nil
+        let starts = Self.changeStarts(diff, layout: layout)
+        guard let index = anchor == .first ? starts.indices.first : starts.indices.last else { return }
+        changeCursor.value = (change.id, index)
+        scroll(proxy, to: starts[index])
     }
 
     /// Plain-language description of a change that has no content diff (rename, mode change, empty file).

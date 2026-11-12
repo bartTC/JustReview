@@ -45,6 +45,8 @@ Tool…** to get the `jrev` command:
 
 | Shortcut | Action |
 |---|---|
+| ⌥⌘↓ / ⌥⌘↑ | Next / previous change (continues into the next file) |
+| ⌥⌘→ / ⌥⌘← | Next / previous file |
 | ⌘1 / ⌘2 | Stacked / side by side |
 | ⌥Z | Wrap lines |
 | ⇧⌘A | Show all files |

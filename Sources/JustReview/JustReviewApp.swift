@@ -121,6 +121,19 @@ struct AppCommands: Commands {
         }
         // ⌘C copies all annotations — except while editing text (e.g. an annotation), where
         // Cut/Copy/Paste/Select All behave as usual.
+        CommandMenu("Navigate") {
+            Button("Next Change") { model?.changeJump = ChangeJump(forward: true) }
+                .keyboardShortcut(.downArrow, modifiers: [.option, .command])
+            Button("Previous Change") { model?.changeJump = ChangeJump(forward: false) }
+                .keyboardShortcut(.upArrow, modifiers: [.option, .command])
+            Divider()
+            Button("Next File") { model?.selectAdjacentFile(forward: true) }
+                .keyboardShortcut(.rightArrow, modifiers: [.option, .command])
+                .disabled(handle?.showsChrome == false)
+            Button("Previous File") { model?.selectAdjacentFile(forward: false) }
+                .keyboardShortcut(.leftArrow, modifiers: [.option, .command])
+                .disabled(handle?.showsChrome == false)
+        }
         CommandGroup(replacing: .pasteboard) {
             Button("Cut") { send(#selector(NSText.cut(_:))) }
                 .keyboardShortcut("x")

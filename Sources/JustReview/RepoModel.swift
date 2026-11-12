@@ -7,6 +7,17 @@ enum DiffMode: String, CaseIterable {
     case split, unified
 }
 
+/// A "next/previous change" request (each request is distinct, so repeats trigger again).
+struct ChangeJump: Equatable {
+    enum Anchor { case first, last }
+    let forward: Bool
+    let nonce = UUID()
+}
+
+extension Array {
+    subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
+}
+
 @MainActor
 final class RepoModel: ObservableObject {
     @Published private(set) var root: URL?
@@ -18,6 +29,10 @@ final class RepoModel: ObservableObject {
     @Published var error: String?
     @Published var editing: EditTarget?
     @Published var scrollRequest: ScrollRequest?
+    /// Keyboard navigation between changes (⌥⌘↓/↑); handled by the diff view.
+    @Published var changeJump: ChangeJump?
+    /// Where to land when navigation moves on to another file (first or last change).
+    var pendingChangeAnchor: ChangeJump.Anchor?
     /// Briefly true after copying annotations (drives the "Copied" button state).
     @Published var justCopied = false
     var copiedResetTask: Task<Void, Never>?
@@ -44,6 +59,25 @@ final class RepoModel: ObservableObject {
     private var watcher: FileWatcher?
 
     var repoName: String { root?.lastPathComponent ?? "JustReview" }
+
+    // MARK: Navigation
+
+    /// Shows the next/previous changed file (in list order) and lands on its first or last change.
+    func selectAdjacentFile(forward: Bool, landOn anchor: ChangeJump.Anchor = .first) {
+        let files = changes.map(\.path)
+        let target: String?
+        if let selection, let i = files.firstIndex(of: selection) {
+            target = forward ? files[safe: i + 1] : files[safe: i - 1]
+        } else if let selection {   // an unchanged file (Show All Files): the nearest change
+            target = forward ? files.first { Git.treeOrder(selection, $0) }
+                             : files.last { Git.treeOrder($0, selection) }
+        } else {
+            target = forward ? files.first : files.last
+        }
+        guard let target else { NSSound.beep(); return }
+        pendingChangeAnchor = anchor
+        selection = target
+    }
 
     var selectedChange: FileChange? {
         guard let selection else { return nil }
