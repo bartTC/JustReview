@@ -9,6 +9,9 @@ struct SettingsView: View {
     @AppStorage(FontPrefs.tabWidth) private var tabWidth = FontPrefs.defaultTabWidth
     @AppStorage(FontPrefs.lineHeight) private var lineHeight = FontPrefs.defaultLineHeight
     @AppStorage("syntaxHighlighting") private var syntaxHighlighting = true
+    @AppStorage(ThemePrefs.lightKey) private var lightTheme = ThemeStore.defaultLight
+    @AppStorage(ThemePrefs.darkKey) private var darkTheme = ThemeStore.defaultDark
+    @StateObject private var themeNames = Box<[String]>(ThemeStore.shared.names())
 
     var body: some View {
         Form {
@@ -38,6 +41,33 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Syntax Theme") {
+                Picker("Light mode", selection: $lightTheme) {
+                    ForEach(themeNames.value, id: \.self) { Text($0).tag($0) }
+                }
+                ThemePreview(themeName: lightTheme, dark: false)
+                Picker("Dark mode", selection: $darkTheme) {
+                    ForEach(themeNames.value, id: \.self) { Text($0).tag($0) }
+                }
+                ThemePreview(themeName: darkTheme, dark: true)
+                HStack {
+                    Text("Helix themes; add your own to the themes folder.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Open Themes Folder") {
+                        let dir = ThemeStore.shared.userDirectory
+                        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                        NSWorkspace.shared.open(dir)
+                    }
+                    Button("Reload") {
+                        ThemeStore.shared.reload()
+                        themeNames.value = ThemeStore.shared.names()
+                    }
+                }
+                .controlSize(.small)
+            }
+
             Section {
                 HStack {
                     Spacer()
@@ -49,6 +79,8 @@ struct SettingsView: View {
                         tabWidth = FontPrefs.defaultTabWidth
                         lineHeight = FontPrefs.defaultLineHeight
                         syntaxHighlighting = true
+                        lightTheme = ThemeStore.defaultLight
+                        darkTheme = ThemeStore.defaultDark
                     }
                 }
             }

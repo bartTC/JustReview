@@ -113,16 +113,26 @@ final class RepoModel: ObservableObject {
 
     /// Highlights both whole file versions (so multi-line strings/comments are right even when a
     /// hunk starts inside one); diff lines then pick their colors by line number.
-    nonisolated private static func syntax(for change: FileChange, in root: URL) -> DiffRenderer.Syntax {
+    nonisolated private static func syntax(for change: FileChange, in root: URL,
+                                           styledScopes: Set<String>) -> DiffRenderer.Syntax {
         guard let language = SyntaxLanguage.detect(path: change.path) else { return .none }
+        let isStyled = { (scope: String) -> Bool in
+            var key = Substring(scope)
+            while true {
+                if styledScopes.contains(String(key)) { return true }
+                guard let dot = key.lastIndex(of: ".") else { return false }
+                key = key[..<dot]
+            }
+        }
         var result = DiffRenderer.Syntax()
         if change.status != "D",
            let data = FileManager.default.contents(atPath: root.appendingPathComponent(change.path).path) {
-            result.new = syntaxHighlighter.lineTokens(for: String(decoding: data, as: UTF8.self), language: language)
+            result.new = syntaxHighlighter.lineTokens(for: String(decoding: data, as: UTF8.self),
+                                                      language: language, isStyled: isStyled)
         }
         if !change.isUntracked, !change.isUnchanged, change.status != "A",
            let old = Git.show(change.oldPath ?? change.path, in: root) {
-            result.old = syntaxHighlighter.lineTokens(for: old, language: language)
+            result.old = syntaxHighlighter.lineTokens(for: old, language: language, isStyled: isStyled)
         }
         return result
     }
@@ -158,16 +168,24 @@ final class RepoModel: ObservableObject {
         let previous = rendered
         let tabWidth = FontPrefs.currentTabWidth
         let syntaxEnabled = UserDefaults.standard.object(forKey: "syntaxHighlighting") as? Bool ?? true
+        // Theme for the current appearance; scopes styled by either theme are kept when
+        // highlighting (so switching appearance only needs a re-render).
+        let isDark = ThemePrefs.systemIsDark
+        let theme = ThemeStore.shared.theme(named: ThemePrefs.name(dark: isDark))
+        let styledScopes = ThemeStore.shared.theme(named: ThemePrefs.name(dark: false)).syntaxScopes
+            .union(ThemeStore.shared.theme(named: ThemePrefs.name(dark: true)).syntaxScopes)
         Task {
             let result = await Task.detached { () -> RenderedDiff? in
                 let raw = (try? Git.diff(for: change, in: root)) ?? ""
                 // Unchanged since last time: keep the current rows (cheap refresh-on-focus).
                 if previous?.changeID == change.id, previous?.rawText == raw,
-                   previous?.tabWidth == tabWidth, previous?.syntaxEnabled == syntaxEnabled { return nil }
-                let syntax = syntaxEnabled ? Self.syntax(for: change, in: root) : .none
+                   previous?.tabWidth == tabWidth, previous?.syntaxEnabled == syntaxEnabled,
+                   previous?.themeName == theme.name { return nil }
+                let syntax = syntaxEnabled ? Self.syntax(for: change, in: root, styledScopes: styledScopes) : .none
                 return DiffRenderer.render(raw, changeID: change.id, tabWidth: tabWidth,
                                            showHunkHeaders: !change.isUnchanged,
-                                           syntax: syntax, syntaxEnabled: syntaxEnabled)
+                                           syntax: syntax, syntaxEnabled: syntaxEnabled,
+                                           styler: ThemeStyler(theme: theme))
             }.value
             guard generation == diffGeneration, let result else { return }
             rendered = result

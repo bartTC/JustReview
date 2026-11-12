@@ -251,11 +251,24 @@ struct DiffDetailView: View {
     @AppStorage(FontPrefs.tabWidth) private var tabWidth = FontPrefs.defaultTabWidth
     @AppStorage(FontPrefs.lineHeight) private var lineHeight = FontPrefs.defaultLineHeight
     @AppStorage("syntaxHighlighting") private var syntaxHighlighting = true
+    @AppStorage(ThemePrefs.lightKey) private var lightTheme = ThemeStore.defaultLight
+    @AppStorage(ThemePrefs.darkKey) private var darkTheme = ThemeStore.defaultDark
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Theme for the current appearance (light/dark chosen separately in Settings).
+    private var theme: SyntaxTheme {
+        ThemeStore.shared.theme(named: colorScheme == .dark ? darkTheme : lightTheme)
+    }
+
+    private var codeBackground: Color { Color(nsColor: theme.background ?? .textBackgroundColor) }
 
     var body: some View {
         detail
             .onChange(of: tabWidth) { model.reloadDiff() }
             .onChange(of: syntaxHighlighting) { model.reloadDiff() }
+            .onChange(of: lightTheme) { model.reloadDiff() }
+            .onChange(of: darkTheme) { model.reloadDiff() }
+            .onChange(of: colorScheme) { model.reloadDiff() }
     }
 
     @ViewBuilder
@@ -267,7 +280,7 @@ struct DiffDetailView: View {
                 if let diff = model.rendered, diff.changeID == change.id {
                     content(diff, change: change)
                 } else {
-                    Color(nsColor: .textBackgroundColor)
+                    codeBackground
                 }
             }
         } else {
@@ -337,9 +350,11 @@ struct DiffDetailView: View {
                     // Line height: extra space split above/below each row, and between wrapped lines.
                     .lineSpacing((lineHeight - 1) * size)
                     .environment(\.diffLinePadding, (lineHeight - 1) * size / 2)
+                    .environment(\.diffLineNumberColor, theme.lineNumber.map { Color(nsColor: $0) })
+                    .foregroundStyle(theme.text.map { Color(nsColor: $0) } ?? Color.primary)
                 }
                 .id("\(change.id)|\(mode.rawValue)") // reset scroll position on file/mode change
-                .background(Color(nsColor: .textBackgroundColor))
+                .background(codeBackground)
                 .onAppear { scrollIfRequested(proxy, diff: diff, path: change.path) }
                 .onChange(of: model.scrollRequest) { scrollIfRequested(proxy, diff: diff, path: change.path) }
             }
@@ -397,20 +412,31 @@ private struct DiffLinePaddingKey: EnvironmentKey {
     static let defaultValue: CGFloat = 0
 }
 
+private struct DiffLineNumberColorKey: EnvironmentKey {
+    static let defaultValue: Color? = nil
+}
+
 extension EnvironmentValues {
     /// Vertical padding above and below each diff line (from the line height setting).
     var diffLinePadding: CGFloat {
         get { self[DiffLinePaddingKey.self] }
         set { self[DiffLinePaddingKey.self] = newValue }
     }
+
+    /// Line number color from the syntax theme (nil = system tertiary).
+    var diffLineNumberColor: Color? {
+        get { self[DiffLineNumberColorKey.self] }
+        set { self[DiffLineNumberColorKey.self] = newValue }
+    }
 }
 
 private struct LineNumber: View {
     let number: Int?
     let width: CGFloat
+    @Environment(\.diffLineNumberColor) private var color
     var body: some View {
         Text(number.map(String.init) ?? "")
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(color.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.tertiary))
             .frame(width: width, alignment: .trailing)
             .padding(.trailing, 4)
     }

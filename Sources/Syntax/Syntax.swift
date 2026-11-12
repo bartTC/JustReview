@@ -64,62 +64,62 @@ public enum SyntaxLanguage: String, CaseIterable, Sendable {
     }
 }
 
-// MARK: - Tokens
+// MARK: - Scopes
 
-/// Highlight categories; the app maps them to colors.
-public enum SyntaxToken: UInt8, Sendable {
-    case none = 0
-    case keyword, string, comment, number, type, function, constant, builtin
-    case attribute, tag, property, escape, heading, link
+/// Highlight scopes use Helix theme names ("keyword.control.import", "constant.numeric", …).
+/// Upstream tree-sitter queries use slightly different capture names; these are translated.
+public enum SyntaxScope {
+    private static let aliases: [String: String] = [
+        "number": "constant.numeric",
+        "float": "constant.numeric.float",
+        "boolean": "constant.builtin.boolean",
+        "character": "constant.character",
+        "escape": "constant.character.escape",
+        "string.escape": "constant.character.escape",
+        "string.regex": "string.regexp",
+        "string.special.key": "variable.other.member",
+        "property": "variable.other.member",
+        "field": "variable.other.member",
+        "variable.member": "variable.other.member",
+        "parameter": "variable.parameter",
+        "method": "function.method",
+        "method.call": "function.method",
+        "function.call": "function",
+        "module": "namespace",
+        "include": "keyword.control.import",
+        "conditional": "keyword.control.conditional",
+        "repeat": "keyword.control.repeat",
+        "exception": "keyword.control.exception",
+        "keyword.return": "keyword.control.return",
+        "storageclass": "keyword.storage",
+        "decorator": "attribute",
+        "tag.attribute": "attribute",
+        "text.title": "markup.heading",
+        "text.literal": "markup.raw",
+        "text.uri": "markup.link.url",
+        "text.reference": "markup.link.text",
+        "text.emphasis": "markup.italic",
+        "text.strong": "markup.bold",
+    ]
 
-    /// Maps a tree-sitter capture name ("keyword.function", "string.special.key", …) to a token.
-    /// Returns nil for captures that shouldn't color anything (punctuation, variables, …).
-    static func from(captureName parts: [String]) -> SyntaxToken? {
-        guard let first = parts.first, !first.hasPrefix("_") else { return nil }
-        let second = parts.count > 1 ? parts[1] : ""
-        switch first {
-        case "comment": return .comment
-        case "string":
-            switch second {
-            case "escape", "regex", "regexp": return .escape
-            case "special": return parts.contains("key") ? .property : .escape
-            default: return .string
+    /// Helix scope for a capture name, or nil for captures that never carry a style.
+    public static func helixScope(forCapture name: String) -> String? {
+        if name.hasPrefix("_") || ["spell", "nospell", "conceal", "none"].contains(name) { return nil }
+        let parts = name.split(separator: ".").map(String.init)
+        for i in stride(from: parts.count, through: 1, by: -1) {
+            if let alias = aliases[parts[0..<i].joined(separator: ".")] {
+                return ([alias] + parts[i...]).joined(separator: ".")
             }
-        case "character": return .string
-        case "escape": return .escape
-        case "number", "float": return .number
-        case "boolean": return .builtin
-        case "constant":
-            switch second {
-            case "builtin": return .builtin
-            case "numeric": return .number
-            default: return .constant
-            }
-        case "keyword", "conditional", "repeat", "include", "exception", "storageclass": return .keyword
-        case "type", "module", "namespace": return .type
-        case "constructor", "function", "method": return .function
-        case "variable": return second == "builtin" ? .builtin : nil
-        case "property", "field": return .property
-        case "attribute", "decorator", "label": return .attribute
-        case "tag": return .tag
-        // Markdown
-        case "text", "markup":
-            switch second {
-            case "title", "heading": return .heading
-            case "literal", "raw": return .string
-            case "uri", "reference", "link": return .link
-            default: return nil
-            }
-        case "none": return SyntaxToken.none
-        default: return nil
         }
+        return name
     }
 }
 
-/// A colored span within one line, in Character offsets of that line.
+/// A styled span within one line, in Character offsets of that line. `scope` is an id from
+/// `SyntaxHighlighter.scopeName(_:)`.
 public struct TokenRun: Sendable, Equatable {
     public let range: Range<Int>
-    public let token: SyntaxToken
+    public let scope: UInt16
 }
 
 // MARK: - Highlighter
@@ -132,6 +132,25 @@ public final class SyntaxHighlighter: @unchecked Sendable {
     private let lock = NSLock()
     private var queries: [SyntaxLanguage: Query] = [:]
     private var failed: Set<SyntaxLanguage> = []
+    private var scopeNames: [String] = [""]          // id 0 = no scope
+    private var scopeIDs: [String: UInt16] = [:]
+
+    /// The Helix scope name for an id in `TokenRun.scope`.
+    public func scopeName(_ id: UInt16) -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return Int(id) < scopeNames.count ? scopeNames[Int(id)] : ""
+    }
+
+    private func scopeID(_ name: String) -> UInt16 {
+        lock.lock()
+        defer { lock.unlock() }
+        if let id = scopeIDs[name] { return id }
+        let id = UInt16(scopeNames.count)
+        scopeNames.append(name)
+        scopeIDs[name] = id
+        return id
+    }
 
     /// - Parameter queriesDirectory: folder with `<language>.scm` highlight queries.
     public init(queriesDirectory: URL) {
@@ -156,7 +175,11 @@ public final class SyntaxHighlighter: @unchecked Sendable {
 
     /// Token runs for every line of `text` (index = line number - 1), or nil if the file
     /// can't be highlighted (unknown grammar, too big, query failed to load).
-    public func lineTokens(for text: String, language: SyntaxLanguage) -> [[TokenRun]]? {
+    ///
+    /// - Parameter isStyled: whether a scope has a style in the theme(s) in use. Unstyled captures
+    ///   are skipped so they don't mask an enclosing styled one (e.g. a variable inside a string).
+    public func lineTokens(for text: String, language: SyntaxLanguage,
+                           isStyled: (String) -> Bool = { _ in true }) -> [[TokenRun]]? {
         guard text.utf8.count <= Self.maxBytes,
               let query = try? query(for: language) else { return nil }
         // Normalise CRLF so "\r\n" (one Character in Swift) splits like "\n".
@@ -168,25 +191,35 @@ public final class SyntaxHighlighter: @unchecked Sendable {
 
         // Collect captures; apply wider ranges first so nested (more specific) ones win,
         // and for identical ranges let the earlier pattern win (tree-sitter convention).
-        struct Capture { let range: NSRange; let pattern: Int; let token: SyntaxToken }
+        struct Capture { let range: NSRange; let pattern: Int; let scope: UInt16 }
         var captures: [Capture] = []
+        var styled: [String: UInt16?] = [:]               // capture name → scope id (nil = unstyled)
         let matches = query.execute(in: tree).resolve(with: .init(string: text))
         for match in matches {
             for capture in match.captures {
-                guard let token = SyntaxToken.from(captureName: capture.nameComponents) else { continue }
-                captures.append(Capture(range: capture.node.range, pattern: match.patternIndex, token: token))
+                let name = capture.nameComponents.joined(separator: ".")
+                let id: UInt16?
+                if let cached = styled[name] {
+                    id = cached
+                } else {
+                    let scope = SyntaxScope.helixScope(forCapture: name)
+                    id = scope.flatMap { isStyled($0) ? scopeID($0) : nil }
+                    styled[name] = id
+                }
+                guard let id else { continue }
+                captures.append(Capture(range: capture.node.range, pattern: match.patternIndex, scope: id))
             }
         }
         captures.sort {
             $0.range.length != $1.range.length ? $0.range.length > $1.range.length : $0.pattern > $1.pattern
         }
 
-        // One token per UTF-16 unit (tree-sitter ranges are UTF-16 here).
+        // One scope per UTF-16 unit (tree-sitter ranges are UTF-16 here).
         let length = text.utf16.count
-        var units = [UInt8](repeating: 0, count: length)
+        var units = [UInt16](repeating: 0, count: length)
         for c in captures {
             let lo = max(0, c.range.location), hi = min(length, c.range.location + c.range.length)
-            if lo < hi { for i in lo..<hi { units[i] = c.token.rawValue } }
+            if lo < hi { for i in lo..<hi { units[i] = c.scope } }
         }
 
         // Split into lines and convert to Character offsets.
@@ -195,18 +228,18 @@ public final class SyntaxHighlighter: @unchecked Sendable {
         for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
             var runs: [TokenRun] = []
             var unit = lineStart, index = 0, start = 0
-            var current = SyntaxToken.none
+            var current: UInt16 = 0
             for ch in line {
-                let token = unit < length ? SyntaxToken(rawValue: units[unit]) ?? .none : .none
-                if token != current {
-                    if current != .none { runs.append(TokenRun(range: start..<index, token: current)) }
-                    current = token
+                let scope = unit < length ? units[unit] : 0
+                if scope != current {
+                    if current != 0 { runs.append(TokenRun(range: start..<index, scope: current)) }
+                    current = scope
                     start = index
                 }
                 unit += ch.utf16.count
                 index += 1
             }
-            if current != .none { runs.append(TokenRun(range: start..<index, token: current)) }
+            if current != 0 { runs.append(TokenRun(range: start..<index, scope: current)) }
             lines.append(runs)
             lineStart += line.utf16.count + 1
         }

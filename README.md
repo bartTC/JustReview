@@ -33,7 +33,7 @@ The list and the diff reload automatically when files in the repository change.
   unchanged files too (greyed out); selecting one shows its full content.
 - ⌘1 stacked, ⌘2 side by side, ⇧⌘R refresh (rarely needed: the repo is watched)
 - ⌘, Settings: font family/size for the file list and the diff view, line height, tab width,
-  syntax highlighting on/off
+  syntax highlighting on/off, and a syntax theme for light mode and one for dark mode
 - Click a diff line (or right-click → Add Annotation…) to annotate it; ⌘↩ saves.
   All annotations are listed in the bottom pane (fold it away with its chevron or ⌥⌘A).
   ⌘C copies them all to the clipboard as Markdown; ⌘R clears them (after confirming):
@@ -62,6 +62,15 @@ Markdown, TOML.
   scanner under current SwiftPM.
 - Highlight queries live in `Resources/queries/<language>.scm` and are copied into the app bundle.
 - `swift run syntax-check` verifies every grammar loads and its query compiles.
+
+### Themes
+
+Syntax themes use the [Helix theme format](https://docs.helix-editor.com/themes.html). All themes
+from Helix 25.07.1 are bundled (`Resources/themes`, MPL-2.0 / their own licenses), plus the built-in
+Xcode Light and Xcode Dark. Pick one for light and one for dark mode in Settings; a theme sets the
+code colors (incl. bold/italic), the diff background, text and line-number colors. Drop your own
+`.toml` themes into `~/Library/Application Support/JustReview/themes` (Settings → Open Themes
+Folder, then Reload); `inherits` and `[palette]` work as in Helix.
 
 To add a language: add the grammar package (or vendor it), its `highlights.scm` as
 `Resources/queries/<name>.scm`, and a case in `SyntaxLanguage` (`Sources/Syntax/Syntax.swift`).

@@ -142,6 +142,7 @@ struct RenderedDiff {
     let split: [SplitRow]
     let tabWidth: Int
     let syntaxEnabled: Bool
+    let themeName: String
     let maxLineNumber: Int
     let added: Int
     let removed: Int
@@ -185,7 +186,8 @@ enum DiffRenderer {
     }
 
     static func render(_ raw: String, changeID: String, tabWidth: Int, showHunkHeaders: Bool = true,
-                       syntax: Syntax = .none, syntaxEnabled: Bool = false) -> RenderedDiff {
+                       syntax: Syntax = .none, syntaxEnabled: Bool = false,
+                       styler: ThemeStyler? = nil) -> RenderedDiff {
         let diff = DiffParser.parse(raw)
         let lineTexts = DiffParser.lineTexts(diff)
 
@@ -196,7 +198,8 @@ enum DiffRenderer {
             return lines[number - 1]
         }
         func attributed(_ line: DiffLine, highlight: Range<Int>?, color: Color) -> AttributedString {
-            DiffRenderer.attributed(line, highlight: highlight, color: color, tokens: tokens(line), tabWidth: tabWidth)
+            DiffRenderer.attributed(line, highlight: highlight, color: color, tokens: tokens(line),
+                                    styler: styler, tabWidth: tabWidth)
         }
         var unified: [UnifiedRow] = []
         var split: [SplitRow] = []
@@ -264,7 +267,8 @@ enum DiffRenderer {
         }
 
         return RenderedDiff(changeID: changeID, rawText: raw, unified: unified, split: split,
-                            tabWidth: tabWidth, syntaxEnabled: syntaxEnabled, maxLineNumber: maxNo, added: added, removed: removed,
+                            tabWidth: tabWidth, syntaxEnabled: syntaxEnabled,
+                            themeName: styler?.theme.name ?? "", maxLineNumber: maxNo, added: added, removed: removed,
                             isBinary: diff.isBinary, notes: diff.notes, lineTexts: lineTexts)
     }
 
@@ -291,7 +295,7 @@ enum DiffRenderer {
     /// Builds a display line: tabs expanded to tab stops, syntax colors, and the changed-span
     /// background. `highlight` and token ranges are Character offsets in the raw (unexpanded) line.
     fileprivate static func attributed(_ line: DiffLine, highlight: Range<Int>?, color: Color,
-                                       tokens: [TokenRun], tabWidth: Int) -> AttributedString {
+                                       tokens: [TokenRun], styler: ThemeStyler?, tabWidth: Int) -> AttributedString {
         // Expand tabs, remembering where each raw character lands.
         var text = ""
         var columns: [Int] = []
@@ -318,8 +322,17 @@ enum DiffRenderer {
             let start = result.characters.index(result.startIndex, offsetBy: lo)
             return start..<result.characters.index(start, offsetBy: hi - lo)
         }
-        for run in tokens {
-            if let r = span(run.range), let c = run.token.color { result[r].foregroundColor = c }
+        if let styler {
+            for run in tokens {
+                guard let style = styler.style(for: run.scope), let r = span(run.range) else { continue }
+                if let fg = style.fg { result[r].foregroundColor = Color(nsColor: fg) }
+                if style.bold || style.italic {
+                    var intent: InlinePresentationIntent = []
+                    if style.bold { intent.insert(.stronglyEmphasized) }
+                    if style.italic { intent.insert(.emphasized) }
+                    result[r].inlinePresentationIntent = intent
+                }
+            }
         }
         if let h = highlight, let r = span(h) { result[r].backgroundColor = color }
 
