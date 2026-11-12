@@ -177,7 +177,14 @@ final class WindowRouter {
     func configureTabbing(_ window: NSWindow, tab: RepoTab) {
         if defaultIdentifier == nil { defaultIdentifier = window.tabbingIdentifier }
         let identifier = "repo:" + tab.root
-        if let parent = tabParents.removeValue(forKey: tab.id), parent !== window {
+        let parent = tabParents.removeValue(forKey: tab.id)
+        // The repository's first window gets its last size and position back (tabs join their
+        // group's frame; diff-only windows keep the default).
+        if parent == nil, !tab.standalone,
+           !handles.contains(where: { $0.path == tab.root && $0.window != nil && $0.window !== window }) {
+            restoreFrame(window, root: tab.root)
+        }
+        if let parent, parent !== window {
             // Fallback if AppKit didn't tab it in by itself.
             if !(parent.tabbedWindows ?? []).contains(window) {
                 parent.addTabbedWindow(window, ordered: .above)
@@ -188,6 +195,27 @@ final class WindowRouter {
         // Per-repository identifier: new repositories / "Open in New Window" don't auto-tab
         // into it, and Merge All Windows only merges tabs of the same repository.
         window.tabbingIdentifier = identifier
+    }
+
+    // MARK: Window frames (remembered per repository)
+
+    private static func frameKey(_ root: String) -> String { "windowFrame:" + root }
+
+    /// Remembers the window's size and position for its repository. Only full repository
+    /// windows count (not diff-only windows), and not in full screen.
+    func saveFrame(of handle: WindowHandle) {
+        guard let window = handle.window, let path = handle.path, handle.showsChrome, window.isVisible,
+              !window.styleMask.contains(.fullScreen) else { return }
+        UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: Self.frameKey(path))
+    }
+
+    private func restoreFrame(_ window: NSWindow, root: String) {
+        guard let string = UserDefaults.standard.string(forKey: Self.frameKey(root)) else { return }
+        let frame = NSRectFromString(string)
+        // Skip frames that are no longer on any screen (e.g. a disconnected display).
+        guard frame.width >= 400, frame.height >= 300,
+              NSScreen.screens.contains(where: { $0.visibleFrame.intersects(frame) }) else { return }
+        window.setFrame(frame, display: true)
     }
 
     private func focus(_ handle: WindowHandle) {
@@ -224,6 +252,11 @@ struct WindowReader: NSViewRepresentable {
 struct RepoWindow: View {
     private func updateChrome() { handle.updateChrome() }
 
+    private func saveFrame(_ note: Notification) {
+        guard let window = note.object as? NSWindow, window === handle.window else { return }
+        WindowRouter.shared.saveFrame(of: handle)
+    }
+
     @Binding var tab: RepoTab?
     @StateObject private var model = RepoModel()
     @StateObject private var handle = WindowHandle()
@@ -256,9 +289,16 @@ struct RepoWindow: View {
             }
             // Tab groups change when tabs are dragged out/in, merged, closed: re-evaluate then.
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in updateChrome() }
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didMoveNotification)) { _ in updateChrome() }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didMoveNotification)) { note in
+                updateChrome()
+                saveFrame(note)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResizeNotification)) { note in
+                saveFrame(note)
+            }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in updateChrome() }
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
+                saveFrame(note)
                 DispatchQueue.main.async { updateChrome() }
             }
             .onChange(of: model.selection) { handle.selection = model.selection }
