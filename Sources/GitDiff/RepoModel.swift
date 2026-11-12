@@ -1,0 +1,142 @@
+import AppKit
+import SwiftUI
+
+enum DiffMode: String, CaseIterable {
+    case split, unified
+}
+
+@MainActor
+final class RepoModel: ObservableObject {
+    @Published private(set) var root: URL?
+    @Published private(set) var branch = ""
+    @Published private(set) var changes: [FileChange] = []
+    @Published private(set) var rendered: RenderedDiff?
+    @Published var error: String?
+    @Published var selection: String? {
+        didSet { if oldValue != selection { loadDiff() } }
+    }
+
+    private var diffGeneration = 0
+    private var isRefreshing = false
+    private var refreshPending = false
+    private var watcher: FileWatcher?
+
+    var repoName: String { root?.lastPathComponent ?? "Git Diff" }
+
+    var selectedChange: FileChange? {
+        guard let selection else { return nil }
+        return changes.first { $0.id == selection }
+    }
+
+    // MARK: Opening
+
+    func openInitial() async {
+        // 1. Path passed on the command line (`gitdiff .` / `GitDiff /path/to/repo`).
+        let fm = FileManager.default
+        for arg in CommandLine.arguments.dropFirst() where !arg.hasPrefix("-") {
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: arg, isDirectory: &isDir), isDir.boolValue {
+                await open(URL(fileURLWithPath: arg), reportErrors: true)
+                return
+            }
+        }
+        // 2. Current directory when started from a terminal.
+        let cwd = fm.currentDirectoryPath
+        if cwd != "/", await open(URL(fileURLWithPath: cwd), reportErrors: false) { return }
+        // 3. Last repository used.
+        if let last = UserDefaults.standard.string(forKey: "lastRepo") {
+            await open(URL(fileURLWithPath: last), reportErrors: false)
+        }
+    }
+
+    func chooseRepository() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Open"
+        panel.message = "Choose a git repository"
+        if panel.runModal() == .OK, let url = panel.url {
+            Task { await open(url, reportErrors: true) }
+        }
+    }
+
+    @discardableResult
+    func open(_ url: URL, reportErrors: Bool) async -> Bool {
+        do {
+            let top = try await Task.detached { try Git.toplevel(for: url) }.value
+            root = top
+            error = nil
+            changes = []
+            rendered = nil
+            selection = nil
+            UserDefaults.standard.set(top.path, forKey: "lastRepo")
+            watcher = FileWatcher(root: top) { [weak self] in
+                Task { await self?.refresh() }
+            }
+            await refresh()
+            return true
+        } catch {
+            if reportErrors { self.error = error.localizedDescription }
+            return false
+        }
+    }
+
+    // MARK: Refresh
+
+    func refresh() async {
+        guard root != nil else { return }
+        // Coalesce: if a refresh is running, run exactly one more after it.
+        if isRefreshing { refreshPending = true; return }
+        isRefreshing = true
+        repeat {
+            refreshPending = false
+            await refreshOnce()
+        } while refreshPending
+        isRefreshing = false
+    }
+
+    private func refreshOnce() async {
+        guard let root else { return }
+        do {
+            let (changes, branch) = try await Task.detached {
+                (try Git.changes(in: root), Git.branch(in: root))
+            }.value
+            guard root == self.root else { return } // repo switched meanwhile
+            if self.branch != branch { self.branch = branch }
+            if self.changes != changes { self.changes = changes }
+
+            if let selection, changes.contains(where: { $0.id == selection }) {
+                loadDiff() // the file may have changed on disk
+            } else {
+                selection = changes.first?.id
+            }
+        } catch {
+            // Transient failures (e.g. mid-rebase) are ignored; the next file event retries.
+        }
+    }
+
+    func reloadDiff() { loadDiff() }
+
+    private func loadDiff() {
+        diffGeneration += 1
+        let generation = diffGeneration
+        guard let root, let change = selectedChange else {
+            rendered = nil
+            return
+        }
+        let previous = rendered
+        let tabWidth = FontPrefs.currentTabWidth
+        Task {
+            let result = await Task.detached { () -> RenderedDiff? in
+                let raw = (try? Git.diff(for: change, in: root)) ?? ""
+                // Unchanged since last time: keep the current rows (cheap refresh-on-focus).
+                if previous?.changeID == change.id, previous?.rawText == raw,
+                   previous?.tabWidth == tabWidth { return nil }
+                return DiffRenderer.render(raw, changeID: change.id, tabWidth: tabWidth)
+            }.value
+            guard generation == diffGeneration, let result else { return }
+            rendered = result
+        }
+    }
+}

@@ -1,0 +1,8 @@
+#!/bin/bash
+# Usage: gitdiff [path]  — open the diff viewer for the repo at path (default: current directory).
+# Each call opens its own window/process, so you can have several repos open.
+here="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+app="${GITDIFF_APP:-$here/build/GitDiff.app}"
+[ -d "$app" ] || app="/Applications/GitDiff.app"
+dir="$(cd "${1:-.}" && pwd)" || exit 1
+open -n -a "$app" --args "$dir"
