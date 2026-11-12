@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import Syntax
 
@@ -155,12 +156,26 @@ struct RenderedDiff {
 }
 
 enum DiffStyle {
-    static let addedBG = Color.green.opacity(0.13)
-    static let addedHL = Color.green.opacity(0.32)
-    static let removedBG = Color.red.opacity(0.13)
-    static let removedHL = Color.red.opacity(0.32)
+    static let rowOpacity = 0.13
+    static let highlightOpacity = 0.25
+    static let addedBG = Color.green.opacity(rowOpacity)
+    static let addedHL = Color.green.opacity(highlightOpacity)
+    static let removedBG = Color.red.opacity(rowOpacity)
+    static let removedHL = Color.red.opacity(highlightOpacity)
     static let hunkBG = Color.accentColor.opacity(0.09)
     static let fillerBG = Color.secondary.opacity(0.06)
+
+    /// The opaque color behind a changed span (code background + row tint + span tint), used to
+    /// keep syntax colors readable on it. System green/red as resolved for the appearance.
+    static func highlightBackground(_ kind: RowKind, base: NSColor, dark: Bool) -> NSColor? {
+        let tint: NSColor
+        switch kind {
+        case .added: tint = NSColor(hex: dark ? 0x30D158 : 0x34C759)
+        case .removed: tint = NSColor(hex: dark ? 0xFF453A : 0xFF3B30)
+        case .context: return nil
+        }
+        return base.over(tint, alpha: rowOpacity).over(tint, alpha: highlightOpacity)
+    }
 
     static func background(_ kind: RowKind) -> Color {
         switch kind {
@@ -189,8 +204,10 @@ enum DiffRenderer {
 
     static func render(_ raw: String, changeID: String, tabWidth: Int, showHunkHeaders: Bool = true,
                        syntax: Syntax = .none, syntaxEnabled: Bool = false,
-                       styler: ThemeStyler? = nil) -> RenderedDiff {
+                       styler: ThemeStyler? = nil, dark: Bool = false) -> RenderedDiff {
         let diff = DiffParser.parse(raw)
+        let base = styler?.theme.background?.usingColorSpace(.sRGB)
+            ?? NSColor(hex: dark ? 0x1E1E1E : 0xFFFFFF)
         let lineTexts = DiffParser.lineTexts(diff)
 
         /// Syntax runs for a diff line, looked up in the file version it belongs to.
@@ -201,7 +218,9 @@ enum DiffRenderer {
         }
         func attributed(_ line: DiffLine, highlight: Range<Int>?, color: Color) -> AttributedString {
             DiffRenderer.attributed(line, highlight: highlight, color: color, tokens: tokens(line),
-                                    styler: styler, tabWidth: tabWidth)
+                                    styler: styler, tabWidth: tabWidth,
+                                    highlightBackground: highlight == nil ? nil
+                                        : DiffStyle.highlightBackground(line.kind == .added ? .added : .removed, base: base, dark: dark))
         }
         var unified: [UnifiedRow] = []
         var split: [SplitRow] = []
@@ -299,7 +318,8 @@ enum DiffRenderer {
     /// Builds a display line: tabs expanded to tab stops, syntax colors, and the changed-span
     /// background. `highlight` and token ranges are Character offsets in the raw (unexpanded) line.
     fileprivate static func attributed(_ line: DiffLine, highlight: Range<Int>?, color: Color,
-                                       tokens: [TokenRun], styler: ThemeStyler?, tabWidth: Int) -> AttributedString {
+                                       tokens: [TokenRun], styler: ThemeStyler?, tabWidth: Int,
+                                       highlightBackground: NSColor? = nil) -> AttributedString {
         // Expand tabs, remembering where each raw character lands.
         var text = ""
         var columns: [Int] = []
@@ -329,7 +349,14 @@ enum DiffRenderer {
         if let styler {
             for run in tokens {
                 guard let style = styler.style(for: run.scope), let r = span(run.range) else { continue }
-                if let fg = style.fg { result[r].foregroundColor = Color(nsColor: fg) }
+                if let fg = style.fg {
+                    result[r].foregroundColor = Color(nsColor: fg)
+                    // Dim colors (comments especially) wash out on the changed-span tint.
+                    if let h = highlight, let bg = highlightBackground,
+                       let ir = span(max(h.lowerBound, run.range.lowerBound)..<max(min(h.upperBound, run.range.upperBound), max(h.lowerBound, run.range.lowerBound))) {
+                        result[ir].foregroundColor = Color(nsColor: fg.readable(on: bg))
+                    }
+                }
                 if style.bold || style.italic {
                     var intent: InlinePresentationIntent = []
                     if style.bold { intent.insert(.stronglyEmphasized) }

@@ -186,7 +186,7 @@ final class RepoModel: ObservableObject {
                 return DiffRenderer.render(raw, changeID: change.id, tabWidth: tabWidth,
                                            showHunkHeaders: !change.isUnchanged,
                                            syntax: syntax, syntaxEnabled: syntaxEnabled,
-                                           styler: ThemeStyler(theme: theme))
+                                           styler: ThemeStyler(theme: theme), dark: isDark)
             }.value
             guard generation == diffGeneration, let result else { return }
             rendered = result

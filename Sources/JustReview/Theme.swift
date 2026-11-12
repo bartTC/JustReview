@@ -267,6 +267,41 @@ enum AppAppearance: String, CaseIterable {
 // MARK: - Colors
 
 extension NSColor {
+    /// This color with `color` composited on top at `alpha` (both treated as opaque sRGB).
+    func over(_ color: NSColor, alpha: Double) -> NSColor {
+        let a = usingColorSpace(.sRGB) ?? self, b = color.usingColorSpace(.sRGB) ?? color
+        func mix(_ x: CGFloat, _ y: CGFloat) -> CGFloat { x * (1 - alpha) + y * alpha }
+        return NSColor(srgbRed: mix(a.redComponent, b.redComponent), green: mix(a.greenComponent, b.greenComponent),
+                       blue: mix(a.blueComponent, b.blueComponent), alpha: 1)
+    }
+
+    /// WCAG relative luminance.
+    var luminance: Double {
+        let c = usingColorSpace(.sRGB) ?? self
+        func lin(_ v: CGFloat) -> Double { v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+        return 0.2126 * lin(c.redComponent) + 0.7152 * lin(c.greenComponent) + 0.0722 * lin(c.blueComponent)
+    }
+
+    /// WCAG contrast ratio (1…21).
+    func contrast(with other: NSColor) -> Double {
+        let (a, b) = (luminance, other.luminance)
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
+
+    /// This color, moved toward white or black (whichever contrasts more with `background`)
+    /// just enough to reach `minimum` contrast. Colors that already reach it are unchanged.
+    func readable(on background: NSColor, minimum: Double = 4.5) -> NSColor {
+        guard contrast(with: background) < minimum else { return self }
+        let target: NSColor = background.luminance < 0.18 ? .white : .black
+        var step = 0.1
+        while step <= 1 {
+            let candidate = over(target, alpha: step)
+            if candidate.contrast(with: background) >= minimum { return candidate }
+            step += 0.1
+        }
+        return over(target, alpha: 1)
+    }
+
     convenience init(hex: UInt32) {
         self.init(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
                   blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
