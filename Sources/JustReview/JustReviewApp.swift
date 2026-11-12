@@ -12,6 +12,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     }
 
+    /// The "+" button in a native tab bar: a new tab of the focused repository.
+    @objc func newWindowForTab(_ sender: Any?) {
+        Task { @MainActor in WindowRouter.shared.openTabForKeyWindow() }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     /// The app used to be called GitDiff (bundle id local.gitdiff): carry over settings and annotations once.
@@ -33,8 +38,8 @@ struct JustReviewApp: App {
 
     var body: some Scene {
         // One window per repository; the window's value is the repo root path.
-        WindowGroup("JustReview", id: "repo", for: String.self) { $path in
-            RepoWindow(path: $path)
+        WindowGroup("JustReview", id: "repo", for: RepoTab.self) { $tab in
+            RepoWindow(tab: $tab)
         }
         // Don't bring back old (often empty) windows on launch; jrev decides what to show.
         .restorationBehavior(.disabled)
@@ -66,13 +71,23 @@ struct AppCommands: Commands {
             Button("Install Command Line Tool…") { CLIInstaller.install() }
         }
         CommandGroup(replacing: .newItem) {
+            Button("New Tab") {
+                if let model, let root = model.root {
+                    WindowRouter.shared.openTab(root: root, file: model.selection, from: handle)
+                }
+            }
+            .keyboardShortcut("t")
+            .disabled(model?.root == nil)
             Button("Open Repository…") { WindowRouter.shared.chooseRepository(preferring: handle) }
                 .keyboardShortcut("o")
         }
         // The file list can't be hidden: drop "Show/Hide Sidebar".
         CommandGroup(replacing: .sidebar) {}
-        // Read-only viewer: drop the save/revert/print items.
-        CommandGroup(replacing: .saveItem) {}
+        // Read-only viewer: no save/revert, just Close (⌘W closes the tab or window).
+        CommandGroup(replacing: .saveItem) {
+            Button("Close") { NSApp.keyWindow?.performClose(nil) }
+                .keyboardShortcut("w")
+        }
         CommandGroup(replacing: .printItem) {}
         CommandGroup(before: .toolbar) {
             Button("Stacked") { mode = .unified }

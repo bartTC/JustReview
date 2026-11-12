@@ -29,6 +29,11 @@ The list and the diff reload automatically when files in the repository change.
 
 ## Use
 
+- Tabs are native macOS window tabs, one tab per file view of a repository: clicking a file shows
+  it in the current tab; double-click (or right-click → Open in New Tab, ⌘T, or the tab bar's +)
+  opens it in a new tab. Drag a tab out of the tab bar to give it its own window (and back in, or
+  Window → Merge All Windows). ⌘W closes the tab. Every tab has the file list and the annotations
+  pane; annotations are shared by all tabs and windows of the repository.
 - The left pane shows the changed files as a tree. **Show All Files** (toolbar or ⇧⌘A) adds the
   unchanged files too (greyed out); selecting one shows its full content.
 - ⌘1 stacked, ⌘2 side by side, ⌥Z toggle line wrap (on by default; without it stacked view

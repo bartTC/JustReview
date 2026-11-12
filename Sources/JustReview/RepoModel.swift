@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import Syntax
 
@@ -20,13 +21,22 @@ final class RepoModel: ObservableObject {
     /// Briefly true after copying annotations (drives the "Copied" button state).
     @Published var justCopied = false
     var copiedResetTask: Task<Void, Never>?
-    /// Review notes. Kept in the app's preferences per repository — never written into the repo.
-    @Published var annotations: [Annotation] = [] {
-        didSet { saveAnnotations() }
+    /// Review notes, shared by all windows of this repository (see `AnnotationStore`).
+    var annotations: [Annotation] {
+        get { annotationStore?.annotations ?? [] }
+        set { annotationStore?.annotations = newValue }
     }
+    private var annotationStore: AnnotationStore?
+    private var annotationSubscription: AnyCancellable?
+    /// The file shown in the diff area (main window: the active tab).
     @Published var selection: String? {
-        didSet { if oldValue != selection { loadDiff() } }
+        didSet {
+            guard oldValue != selection else { return }
+            loadDiff()
+        }
     }
+
+    private var didInitialSelection = false
 
     private var diffGeneration = 0
     private var isRefreshing = false
@@ -37,21 +47,27 @@ final class RepoModel: ObservableObject {
 
     var selectedChange: FileChange? {
         guard let selection else { return nil }
+        // A tab or pinned file that isn't changed (any more) is shown as an unchanged file.
         return changes.first { $0.id == selection } ?? unchanged.first { $0.id == selection }
+            ?? FileChange(status: " ", path: selection, oldPath: nil)
     }
 
     // MARK: Opening
 
+    /// - Parameter select: file to show first (otherwise the first change).
     @discardableResult
-    func open(_ url: URL, reportErrors: Bool) async -> Bool {
+    func open(_ url: URL, reportErrors: Bool, select: String? = nil) async -> Bool {
         do {
             let top = try await Task.detached { try Git.toplevel(for: url) }.value
             root = top
             error = nil
             changes = []
             rendered = nil
-            selection = nil
-            loadAnnotations()
+            didInitialSelection = false
+            selection = select
+            let store = AnnotationStore.shared(for: top)
+            annotationStore = store
+            annotationSubscription = store.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
             watcher = FileWatcher(root: top) { [weak self] in
                 Task { await self?.refresh() }
             }
@@ -97,12 +113,18 @@ final class RepoModel: ObservableObject {
             if self.changes != changes { self.changes = changes }
             if self.unchanged != unchanged { self.unchanged = unchanged }
 
-            if let selection, changes.contains(where: { $0.id == selection })
-                || unchanged.contains(where: { $0.id == selection }) {
-                loadDiff() // the file may have changed on disk
-            } else {
-                selection = changes.first?.id
+            // The shown file is gone (no longer changed and not on disk): show the first change.
+            let known = Set(changes.map(\.path) + unchanged.map(\.path))
+            if let selection, !known.contains(selection),
+               !FileManager.default.fileExists(atPath: root.appendingPathComponent(selection).path) {
+                self.selection = changes.first?.id
             }
+            // Show the first change when the repo is opened.
+            if !didInitialSelection {
+                didInitialSelection = true
+                if selection == nil { selection = changes.first?.id }
+            }
+            loadDiff() // the shown file may have changed on disk
             await validateAnnotations(changes: changes, root: root)
         } catch {
             // Transient failures (e.g. mid-rebase) are ignored; the next file event retries.
@@ -137,27 +159,6 @@ final class RepoModel: ObservableObject {
         return result
     }
 
-    // MARK: Annotation persistence
-
-    private var annotationsKey: String? { root.map { "annotations:" + $0.path } }
-
-    private func loadAnnotations() {
-        guard let key = annotationsKey,
-              let data = UserDefaults.standard.data(forKey: key),
-              let list = try? JSONDecoder().decode([Annotation].self, from: data)
-        else { annotations = []; return }
-        annotations = list
-    }
-
-    private func saveAnnotations() {
-        guard let key = annotationsKey else { return }
-        if annotations.isEmpty {
-            UserDefaults.standard.removeObject(forKey: key)
-        } else if let data = try? JSONEncoder().encode(annotations) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
-    }
-
     private func loadDiff() {
         diffGeneration += 1
         let generation = diffGeneration
@@ -189,6 +190,44 @@ final class RepoModel: ObservableObject {
             }.value
             guard generation == diffGeneration, let result else { return }
             rendered = result
+        }
+    }
+}
+
+/// Annotations of one repository, shared by every window showing it (main window and standalone
+/// file windows). Kept in the app's preferences — never written into the repository.
+@MainActor
+final class AnnotationStore: ObservableObject {
+    private static var stores: [String: AnnotationStore] = [:]
+
+    static func shared(for root: URL) -> AnnotationStore {
+        if let store = stores[root.path] { return store }
+        let store = AnnotationStore(root: root)
+        stores[root.path] = store
+        return store
+    }
+
+    @Published var annotations: [Annotation] {
+        didSet { save() }
+    }
+
+    private let key: String
+
+    private init(root: URL) {
+        key = "annotations:" + root.path
+        if let data = UserDefaults.standard.data(forKey: key),
+           let list = try? JSONDecoder().decode([Annotation].self, from: data) {
+            annotations = list
+        } else {
+            annotations = []
+        }
+    }
+
+    private func save() {
+        if annotations.isEmpty {
+            UserDefaults.standard.removeObject(forKey: key)
+        } else if let data = try? JSONEncoder().encode(annotations) {
+            UserDefaults.standard.set(data, forKey: key)
         }
     }
 }

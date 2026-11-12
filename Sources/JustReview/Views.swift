@@ -23,8 +23,10 @@ struct ContentView: View {
         // The toolbar's tinted detail section doesn't line up with the split view's divider
         // on recent macOS; hiding the toolbar background removes the misaligned edge.
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-        .navigationTitle(model.repoName)
-        .navigationSubtitle(model.branch)
+        // Each native tab is titled with its file; the repository and branch go underneath.
+        .navigationTitle(model.selection.map { ($0 as NSString).lastPathComponent } ?? model.repoName)
+        .navigationSubtitle(model.selection == nil ? model.branch
+                            : [model.repoName, model.branch].filter { !$0.isEmpty }.joined(separator: " — "))
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Picker("Layout", selection: $mode) {
@@ -74,6 +76,14 @@ struct FileListView: View {
     @AppStorage(FontPrefs.listFamily) private var family = ""
     @AppStorage(FontPrefs.listSize) private var size = FontPrefs.defaultListSize
     @AppStorage("showAllFiles") private var showAll = false
+    @Environment(\.openWindow) private var openWindow
+
+    /// A new native tab of this repository showing `path` (drag the tab out for its own window).
+    private func openInNewTab(_ path: String) {
+        guard let root = model.root else { return }
+        WindowRouter.shared.openTab(root: root, file: path, from: handle)
+    }
+
     /// Folders the user expanded/collapsed by hand; others use the default (see `isExpanded`).
     @StateObject private var expansion = Box<[String: Bool]>([:])
 
@@ -82,6 +92,17 @@ struct FileListView: View {
         let tree = FileTree.build(model.changes + (showAll ? model.unchanged : []))
         List(selection: $model.selection) {
             FileTreeRows(nodes: tree, font: font, size: size, isExpanded: isExpanded)
+        }
+        // Double-click (or Return) opens the file in a new native tab.
+        .contextMenu(forSelectionType: String.self) { paths in
+            if let path = paths.first {
+                Button("Open in New Tab") { openInNewTab(path) }
+                Button("Open in New Window") {
+                    if let root = model.root { openWindow(value: RepoTab(root: root.path, file: path)) }
+                }
+            }
+        } primaryAction: { paths in
+            paths.forEach(openInNewTab)
         }
         .onChange(of: showAll) { Task { await model.refresh() } }
         // File-list controls live in the sidebar's part of the toolbar (right-aligned).

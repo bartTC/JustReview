@@ -1,6 +1,14 @@
 import AppKit
 import SwiftUI
 
+/// Scene value of a repository window. Each native tab is its own window; `id` lets several tabs
+/// show the same repository, `file` is the file a new tab starts on.
+struct RepoTab: Codable, Hashable {
+    var root: String
+    var file: String?
+    var id = UUID()
+}
+
 /// One per window: what repo it shows and how to reach it.
 @MainActor
 final class WindowHandle: ObservableObject {
@@ -79,7 +87,38 @@ final class WindowRouter {
             empty.adopt(root)
             focus(empty)
         } else {
-            openWindow?(value: root)
+            openWindow?(value: RepoTab(root: root))
+        }
+    }
+
+    // MARK: Native tabs
+
+    /// Windows that new tabs should join, keyed by the new tab's id.
+    private var tabParents: [UUID: NSWindow] = [:]
+
+    /// Opens another native tab of the same repository (⌘T, "+", Open in New Tab).
+    func openTab(root: URL, file: String?, from handle: WindowHandle?) {
+        let tab = RepoTab(root: root.path, file: file)
+        if let window = handle?.window { tabParents[tab.id] = window }
+        openWindow?(value: tab)
+    }
+
+    /// "+" in the tab bar / New Tab with no repository window focused.
+    func openTabForKeyWindow() {
+        guard let handle = handles.first(where: { $0.window == NSApp.keyWindow }),
+              let path = handle.path else { NSSound.beep(); return }
+        openTab(root: URL(fileURLWithPath: path), file: nil, from: handle)
+    }
+
+    /// Called once a repository window exists: tags it for its repository's tab group and, if it
+    /// was opened as a tab, adds it to the window it was opened from.
+    func configureTabbing(_ window: NSWindow, tab: RepoTab) {
+        window.tabbingIdentifier = "repo:" + tab.root
+        window.tabbingMode = .preferred
+        if let parent = tabParents.removeValue(forKey: tab.id), parent !== window,
+           parent.tabbingIdentifier == window.tabbingIdentifier {
+            parent.addTabbedWindow(window, ordered: .above)
+            window.makeKeyAndOrderFront(nil)
         }
     }
 
@@ -115,32 +154,39 @@ struct WindowReader: NSViewRepresentable {
 
 /// A repository window: owns its model and keeps the router informed.
 struct RepoWindow: View {
-    @Binding var path: String?
+    @Binding var tab: RepoTab?
     @StateObject private var model = RepoModel()
     @StateObject private var handle = WindowHandle()
+    @StateObject private var tabbedFor = Box<String?>(nil)   // repo the tabbing was set up for
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         ContentView(model: model, handle: handle)
             .frame(minWidth: 800, minHeight: 500)
-            .background(WindowReader { handle.window = $0 })
+            .background(WindowReader { window in
+                handle.window = window
+                if let window, let tab, tabbedFor.value != tab.root {
+                    tabbedFor.value = tab.root
+                    WindowRouter.shared.configureTabbing(window, tab: tab)
+                }
+            })
             .focusedSceneObject(model)
             .focusedSceneObject(handle)
             .onAppear {
-                handle.path = path
-                handle.adopt = { path = $0 }
+                handle.path = tab?.root
+                handle.adopt = { tab = RepoTab(root: $0) }
                 WindowRouter.shared.register(handle, openWindow: openWindow)
             }
             .onDisappear { WindowRouter.shared.unregister(handle) }
-            .onChange(of: path) { handle.path = path }
+            .onChange(of: tab) { handle.path = tab?.root }
             // Folders opened from outside (jrev → `open -a JustReview <dir>`, Finder, Dock) are
             // delivered to an existing window instead of spawning one; SwiftUI only creates a
             // window when none exists. The router then focuses/reuses/opens the right window.
             .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
             .onOpenURL { url in WindowRouter.shared.open(url, preferring: handle) }
-            .task(id: path) {
-                guard let path else { return }
-                await model.open(URL(fileURLWithPath: path), reportErrors: true)
+            .task(id: tab?.root) {
+                guard let tab else { return }
+                await model.open(URL(fileURLWithPath: tab.root), reportErrors: true, select: tab.file)
             }
     }
 }
