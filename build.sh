@@ -13,6 +13,7 @@ cp "$BIN" "$APP/Contents/MacOS/JustReview"
 cp jrev "$APP/Contents/Resources/jrev"   # shell launcher, linked by "Install Command Line Tool…"
 cp -R Resources/queries "$APP/Contents/Resources/queries"   # tree-sitter highlight queries
 cp -R Resources/themes "$APP/Contents/Resources/themes"     # Helix syntax themes
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -23,6 +24,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleDisplayName</key><string>JustReview</string>
     <key>CFBundleIdentifier</key><string>local.justreview</string>
     <key>CFBundleExecutable</key><string>JustReview</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>1.0</string>
     <key>CFBundleVersion</key><string>1</string>
