@@ -236,6 +236,34 @@ enum ThemePrefs {
     }
 }
 
+/// The app's appearance (Settings → Appearance): follow the system, or force light or dark.
+/// Views and diff colours follow it through the effective appearance / colour scheme.
+enum AppAppearance: String, CaseIterable {
+    case system, light, dark
+
+    static let key = "appearance"
+
+    var title: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+
+    static var current: AppAppearance {
+        UserDefaults.standard.string(forKey: key).flatMap(AppAppearance.init) ?? .system
+    }
+
+    @MainActor func apply() {
+        NSApp.appearance = switch self {
+        case .system: nil
+        case .light: NSAppearance(named: .aqua)
+        case .dark: NSAppearance(named: .darkAqua)
+        }
+    }
+}
+
 // MARK: - Colors
 
 extension NSColor {

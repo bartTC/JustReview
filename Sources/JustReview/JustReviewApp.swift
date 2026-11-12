@@ -3,6 +3,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         migrateDefaultsFromGitDiff()
+        AppAppearance.current.apply()
         // New tabs should open directly as tabs (no separate window first). AppKit only does that
         // when the tabbing preference is "always"; set it for this app (read once at launch).
         // Which windows actually join is controlled via tabbing identifiers (WindowRouter).

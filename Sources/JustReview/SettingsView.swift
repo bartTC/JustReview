@@ -9,12 +9,21 @@ struct SettingsView: View {
     @AppStorage(FontPrefs.tabWidth) private var tabWidth = FontPrefs.defaultTabWidth
     @AppStorage(FontPrefs.lineHeight) private var lineHeight = FontPrefs.defaultLineHeight
     @AppStorage("syntaxHighlighting") private var syntaxHighlighting = true
+    @AppStorage(AppAppearance.key) private var appearance: AppAppearance = .system
     @AppStorage(ThemePrefs.lightKey) private var lightTheme = ThemeStore.defaultLight
     @AppStorage(ThemePrefs.darkKey) private var darkTheme = ThemeStore.defaultDark
     @StateObject private var themeNames = Box<[String]>(ThemeStore.shared.names())
 
     var body: some View {
         Form {
+            Section {
+                Picker("Appearance", selection: $appearance) {
+                    ForEach(AppAppearance.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: appearance) { appearance.apply() }
+            }
+
             Section("File List") {
                 FamilyPicker(selection: $listFamily, families: FontPrefs.allFamilies, systemLabel: "System")
                 SizeStepper(size: $listSize)
@@ -72,6 +81,7 @@ struct SettingsView: View {
                 HStack {
                     Spacer()
                     Button("Restore Defaults") {
+                        appearance = .system
                         listFamily = ""
                         listSize = FontPrefs.defaultListSize
                         diffFamily = ""
