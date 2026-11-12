@@ -5,17 +5,20 @@ struct ContentView: View {
     @AppStorage("diffMode") private var mode: DiffMode = .unified
 
     var body: some View {
-        VSplitView {
+        // Annotations pane sits below the split view and takes real space
+        // (a safe-area inset would let the split view's columns scroll underneath it).
+        VStack(spacing: 0) {
             NavigationSplitView {
                 FileListView(model: model)
                     .navigationSplitViewColumnWidth(min: 200, ideal: 280, max: 500)
             } detail: {
                 DiffDetailView(model: model, mode: mode)
             }
-            .frame(minHeight: 250, idealHeight: 2000)
-            .layoutPriority(1)
             AnnotationsPane(model: model)
         }
+        // The toolbar's tinted detail section doesn't line up with the split view's divider
+        // on recent macOS; hiding the toolbar background removes the misaligned edge.
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .navigationTitle(model.repoName)
         .navigationSubtitle(model.branch)
         .toolbar {
@@ -164,7 +167,7 @@ struct DiffDetailView: View {
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(Capsule().fill(Color.secondary.opacity(0.15)))
             Spacer()
-            if let d = model.rendered, d.changeID == change.id, !d.isBinary {
+            if let d = model.rendered, d.changeID == change.id, !d.isBinary, d.added + d.removed > 0 {
                 Text("+\(d.added)").foregroundStyle(.green)
                 Text("−\(d.removed)").foregroundStyle(.red)
             }
@@ -180,9 +183,11 @@ struct DiffDetailView: View {
         if diff.isBinary {
             ContentUnavailableView("Binary File", systemImage: "doc.zipper",
                                    description: Text("Binary files can’t be shown as text."))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if diff.unified.isEmpty {
             ContentUnavailableView("No Content Changes", systemImage: "doc",
-                                   description: Text(diff.notes.isEmpty ? "The diff is empty." : diff.notes.joined(separator: "\n")))
+                                   description: Text(Self.summary(diff.notes, change: change)))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             let nsFont = FontPrefs.diffFont(family: family, size: size)
             let digits = max(String(diff.maxLineNumber).count, 2)
@@ -216,6 +221,23 @@ struct DiffDetailView: View {
                 .onChange(of: model.scrollRequest) { scrollIfRequested(proxy, diff: diff, path: change.path) }
             }
         }
+    }
+
+    /// Plain-language description of a change that has no content diff (rename, mode change, empty file).
+    static func summary(_ notes: [String], change: FileChange) -> String {
+        func value(_ prefix: String) -> String? {
+            notes.first { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces) }
+        }
+        var lines: [String] = []
+        if let old = change.oldPath {
+            lines.append(change.status == "C" ? "Copied from \(old) without changes." : "Renamed from \(old) without changes.")
+        }
+        if let from = value("old mode"), let to = value("new mode") {
+            lines.append("File mode changed from \(from) to \(to).")
+        }
+        if value("new file mode") != nil { lines.append("Empty file added.") }
+        if value("deleted file mode") != nil { lines.append("Empty file deleted.") }
+        return lines.isEmpty ? "The diff is empty." : lines.joined(separator: "\n")
     }
 
     /// Jump to an annotated line when one is picked in the annotations pane.
@@ -264,9 +286,12 @@ private struct AnnotatableLine: ViewModifier {
     @ObservedObject var model: RepoModel
     let target: EditTarget
     let text: AttributedString
+    @StateObject private var hovered = Box(false)
 
     func body(content: Content) -> some View {
         content
+            .overlay(Color.primary.opacity(hovered.value ? 0.06 : 0).allowsHitTesting(false))
+            .onHover { hovered.value = $0 }
             .contentShape(Rectangle())
             .onTapGesture(count: 2) { model.editing = target }
             .contextMenu {
@@ -308,9 +333,9 @@ struct UnifiedRowView: View {
                 .modifier(AnnotatableLine(model: model, target: target, text: row.text))
 
                 if let note = model.annotation(path: path, key: key) {
-                    AnnotationNoteView(annotation: note, indent: gutter * 2 + 24) {
-                        model.editing = target
-                    }
+                    AnnotationNoteView(annotation: note, indent: gutter * 2 + 24,
+                                       onEdit: { model.editing = target },
+                                       onDelete: { model.removeAnnotation(note) })
                 }
             }
         }
@@ -364,9 +389,9 @@ struct SplitRowView: View {
     }
 
     private func note(_ a: Annotation, column: Int) -> some View {
-        AnnotationNoteView(annotation: a, indent: gutter + 22) {
-            model.editing = EditTarget(path: path, key: a.key, rowID: row.id, column: column)
-        }
+        AnnotationNoteView(annotation: a, indent: gutter + 22,
+                           onEdit: { model.editing = EditTarget(path: path, key: a.key, rowID: row.id, column: column) },
+                           onDelete: { model.removeAnnotation(a) })
     }
 }
 

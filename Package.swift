@@ -1,10 +1,14 @@
-// swift-tools-version:5.9
+// swift-tools-version:6.0
 import PackageDescription
 
 let package = Package(
     name: "GitDiff",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     targets: [
-        .executableTarget(name: "GitDiff", path: "Sources/GitDiff")
+        .executableTarget(
+            name: "GitDiff",
+            path: "Sources/GitDiff",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        )
     ]
 )

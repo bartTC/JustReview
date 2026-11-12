@@ -22,6 +22,9 @@ struct GitDiffApp: App {
                 .frame(minWidth: 800, minHeight: 500)
         }
         .commands {
+            CommandGroup(after: .appSettings) {
+                Button("Install Command Line Tool…") { CLIInstaller.install() }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("Open Repository…") { model.chooseRepository() }
                     .keyboardShortcut("o")

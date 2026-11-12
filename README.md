@@ -8,13 +8,14 @@ and shows the diff stacked or side by side. It never writes to the repository.
 
     ./build.sh            # -> build/GitDiff.app
 
-Requires macOS 14+ and the Xcode Command Line Tools.
+Requires macOS 15+ and the Xcode Command Line Tools.
 
 ## Run
 
     ./gitdiff [path]      # opens the repo at path (default: current dir)
 
-Symlink `gitdiff` onto your PATH to use it from anywhere. You can also open a repo
+To use it from anywhere, choose **Git Diff → Install Command Line Tool…** in the app; it links
+`/usr/local/bin/gitdiff` to the launcher inside the app (asks for your password if needed). You can also open a repo
 with ⌘O or by dropping a folder on the window.
 
 ## Use
@@ -29,3 +30,6 @@ with ⌘O or by dropping a folder on the window.
 
   `(+)` = added line, `(-)` = removed line, no suffix = unchanged line. Annotations are kept per
   repository in the app's preferences (never written into the repo).
+- Annotations are anchored to the line's content. When files change, a note follows its line if
+  the line just moved; if the line itself was changed (or is no longer in the diff) the note is
+  dropped, on the assumption that it has been addressed.

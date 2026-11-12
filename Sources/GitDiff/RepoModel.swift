@@ -118,6 +118,7 @@ final class RepoModel: ObservableObject {
             } else {
                 selection = changes.first?.id
             }
+            await validateAnnotations(changes: changes, root: root)
         } catch {
             // Transient failures (e.g. mid-rebase) are ignored; the next file event retries.
         }

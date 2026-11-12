@@ -1,8 +1,16 @@
 #!/bin/bash
 # Usage: gitdiff [path]  — open the diff viewer for the repo at path (default: current directory).
 # Each call opens its own window/process, so you can have several repos open.
-here="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
-app="${GITDIFF_APP:-$here/build/GitDiff.app}"
-[ -d "$app" ] || app="/Applications/GitDiff.app"
+#
+# Works both from the source checkout (uses build/GitDiff.app) and when installed via
+# GitDiff → Install Command Line Tool… (a symlink to the copy inside GitDiff.app).
+self="$(readlink -f "$0")"
+here="$(cd "$(dirname "$self")" && pwd)"
+if [ -d "$here/../MacOS" ]; then
+    app="$(cd "$here/../.." && pwd)"            # inside GitDiff.app/Contents/Resources
+else
+    app="${GITDIFF_APP:-$here/build/GitDiff.app}"
+    [ -d "$app" ] || app="/Applications/GitDiff.app"
+fi
 dir="$(cd "${1:-.}" && pwd)" || exit 1
 open -n -a "$app" --args "$dir"

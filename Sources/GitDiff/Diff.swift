@@ -73,6 +73,14 @@ enum DiffParser {
         return diff
     }
 
+    static func lineTexts(_ diff: FileDiff) -> [LineKey: String] {
+        var map: [LineKey: String] = [:]
+        for hunk in diff.hunks {
+            for line in hunk.lines { map[DiffRenderer.key(line)] = line.text }
+        }
+        return map
+    }
+
     private static func parseHunkHeader(_ line: String) -> (Int, Int) {
         let parts = line.split(separator: " ")
         guard parts.count >= 3 else { return (0, 0) }
@@ -137,6 +145,8 @@ struct RenderedDiff {
     let removed: Int
     let isBinary: Bool
     let notes: [String]
+    /// Raw text of every line in the diff, used to anchor annotations to content.
+    let lineTexts: [LineKey: String]
 }
 
 enum DiffStyle {
@@ -167,6 +177,7 @@ enum DiffStyle {
 enum DiffRenderer {
     static func render(_ raw: String, changeID: String, tabWidth: Int) -> RenderedDiff {
         var diff = DiffParser.parse(raw)
+        let lineTexts = DiffParser.lineTexts(diff)
         for h in diff.hunks.indices {
             for l in diff.hunks[h].lines.indices {
                 diff.hunks[h].lines[l].text = expandTabs(diff.hunks[h].lines[l].text, width: tabWidth)
@@ -237,10 +248,10 @@ enum DiffRenderer {
 
         return RenderedDiff(changeID: changeID, rawText: raw, unified: unified, split: split,
                             tabWidth: tabWidth, maxLineNumber: maxNo, added: added, removed: removed,
-                            isBinary: diff.isBinary, notes: diff.notes)
+                            isBinary: diff.isBinary, notes: diff.notes, lineTexts: lineTexts)
     }
 
-    private static func key(_ line: DiffLine) -> LineKey {
+    static func key(_ line: DiffLine) -> LineKey {
         switch line.kind {
         case .removed: return LineKey(side: .removed, line: line.oldNo ?? 0)
         case .added: return LineKey(side: .added, line: line.newNo ?? 0)
