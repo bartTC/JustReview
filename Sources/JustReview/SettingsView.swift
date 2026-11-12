@@ -13,7 +13,7 @@ struct SettingsView: View {
             Section("File List") {
                 FamilyPicker(selection: $listFamily, families: FontPrefs.allFamilies, systemLabel: "System")
                 SizeStepper(size: $listSize)
-                Text("Sources/GitDiff/Views.swift")
+                Text("Sources/JustReview/Views.swift")
                     .font(Font(FontPrefs.listFont(family: listFamily, size: listSize) as CTFont))
                     .foregroundStyle(.secondary)
             }

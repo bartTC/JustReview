@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "GitDiff",
+    name: "JustReview",
     platforms: [.macOS(.v15)],
     targets: [
         .executableTarget(
-            name: "GitDiff",
-            path: "Sources/GitDiff",
+            name: "JustReview",
+            path: "Sources/JustReview",
             swiftSettings: [.swiftLanguageMode(.v5)]
         )
     ]

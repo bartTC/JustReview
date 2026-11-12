@@ -1,0 +1,18 @@
+#!/bin/bash
+# Usage: jrev [path]  — review the git repo at path (default: current directory) in JustReview.
+# If a JustReview window already shows that repo it is brought to the front; otherwise the repo
+# opens in a new window.
+#
+# Works both from the source checkout (uses build/JustReview.app) and when installed via
+# JustReview → Install Command Line Tool… (a symlink to the copy inside JustReview.app).
+self="$(readlink -f "$0")"
+here="$(cd "$(dirname "$self")" && pwd)"
+if [ -d "$here/../MacOS" ]; then
+    app="$(cd "$here/../.." && pwd)"            # inside JustReview.app/Contents/Resources
+else
+    app="${JUSTREVIEW_APP:-$here/build/JustReview.app}"
+    [ -d "$app" ] || app="/Applications/JustReview.app"
+fi
+dir="$(cd "${1:-.}" && pwd)" || exit 1
+# Hand the folder to the (single) app instance; it focuses or opens the matching window.
+open -a "$app" "$dir"

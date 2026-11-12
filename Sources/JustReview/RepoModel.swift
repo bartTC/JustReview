@@ -27,7 +27,7 @@ final class RepoModel: ObservableObject {
     private var refreshPending = false
     private var watcher: FileWatcher?
 
-    var repoName: String { root?.lastPathComponent ?? "Git Diff" }
+    var repoName: String { root?.lastPathComponent ?? "JustReview" }
 
     var selectedChange: FileChange? {
         guard let selection else { return nil }
@@ -35,37 +35,6 @@ final class RepoModel: ObservableObject {
     }
 
     // MARK: Opening
-
-    func openInitial() async {
-        // 1. Path passed on the command line (`gitdiff .` / `GitDiff /path/to/repo`).
-        let fm = FileManager.default
-        for arg in CommandLine.arguments.dropFirst() where !arg.hasPrefix("-") {
-            var isDir: ObjCBool = false
-            if fm.fileExists(atPath: arg, isDirectory: &isDir), isDir.boolValue {
-                await open(URL(fileURLWithPath: arg), reportErrors: true)
-                return
-            }
-        }
-        // 2. Current directory when started from a terminal.
-        let cwd = fm.currentDirectoryPath
-        if cwd != "/", await open(URL(fileURLWithPath: cwd), reportErrors: false) { return }
-        // 3. Last repository used.
-        if let last = UserDefaults.standard.string(forKey: "lastRepo") {
-            await open(URL(fileURLWithPath: last), reportErrors: false)
-        }
-    }
-
-    func chooseRepository() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Open"
-        panel.message = "Choose a git repository"
-        if panel.runModal() == .OK, let url = panel.url {
-            Task { await open(url, reportErrors: true) }
-        }
-    }
 
     @discardableResult
     func open(_ url: URL, reportErrors: Bool) async -> Bool {

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var model: RepoModel
+    let handle: WindowHandle
     @AppStorage("diffMode") private var mode: DiffMode = .unified
 
     var body: some View {
@@ -9,7 +10,7 @@ struct ContentView: View {
         // (a safe-area inset would let the split view's columns scroll underneath it).
         VStack(spacing: 0) {
             NavigationSplitView {
-                FileListView(model: model)
+                FileListView(model: model, handle: handle)
                     .navigationSplitViewColumnWidth(min: 200, ideal: 280, max: 500)
             } detail: {
                 DiffDetailView(model: model, mode: mode)
@@ -36,7 +37,7 @@ struct ContentView: View {
                 .help("Refresh (⌘R)")
                 .disabled(model.root == nil)
 
-                Button { model.chooseRepository() } label: {
+                Button { WindowRouter.shared.chooseRepository(preferring: handle) } label: {
                     Label("Open Repository", systemImage: "folder")
                 }
                 .help("Open Repository (⌘O)")
@@ -44,7 +45,7 @@ struct ContentView: View {
         }
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first else { return false }
-            Task { await model.open(url, reportErrors: true) }
+            WindowRouter.shared.open(url, preferring: handle)
             return true
         }
         .alert("Can’t open repository", isPresented: Binding(
@@ -58,7 +59,6 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await model.refresh() }
         }
-        .task { await model.openInitial() }
     }
 }
 
@@ -66,6 +66,7 @@ struct ContentView: View {
 
 struct FileListView: View {
     @ObservedObject var model: RepoModel
+    let handle: WindowHandle
     @AppStorage(FontPrefs.listFamily) private var family = ""
     @AppStorage(FontPrefs.listSize) private var size = FontPrefs.defaultListSize
 
@@ -79,9 +80,14 @@ struct FileListView: View {
                 ContentUnavailableView {
                     Label("No Repository", systemImage: "folder")
                 } description: {
-                    Text("Open a git repository or drop a folder here.")
+                    Text("Open a git repository, drop a folder here, or run “jrev” in a repository.")
                 } actions: {
-                    Button("Open Repository…") { model.chooseRepository() }
+                    Button("Open Repository…") { WindowRouter.shared.chooseRepository(preferring: handle) }
+                    if let last = UserDefaults.standard.string(forKey: "lastRepo") {
+                        Button("Open “\((last as NSString).lastPathComponent)”") {
+                            WindowRouter.shared.open(URL(fileURLWithPath: last), preferring: handle)
+                        }
+                    }
                 }
             } else if model.changes.isEmpty {
                 ContentUnavailableView("No Changes", systemImage: "checkmark.circle",

@@ -1,14 +1,14 @@
 import AppKit
 
-/// "Install Command Line Tool…": symlinks /usr/local/bin/gitdiff to the launcher script
-/// bundled in GitDiff.app, so `gitdiff [path]` works from any shell.
+/// "Install Command Line Tool…": symlinks /usr/local/bin/jrev to the launcher script
+/// bundled in JustReview.app, so `jrev [path]` works from any shell.
 enum CLIInstaller {
-    static let linkPath = "/usr/local/bin/gitdiff"
+    static let linkPath = "/usr/local/bin/jrev"
 
     static func install() {
-        guard let script = Bundle.main.url(forResource: "gitdiff", withExtension: nil)?.path else {
+        guard let script = Bundle.main.url(forResource: "jrev", withExtension: nil)?.path else {
             alert("Command line tool not found",
-                  "Run GitDiff.app built with ./build.sh to install the command line tool.")
+                  "Run JustReview.app built with ./build.sh to install the command line tool.")
             return
         }
         let fm = FileManager.default
@@ -40,7 +40,7 @@ enum CLIInstaller {
             }
         }
         alert("Command line tool installed",
-              "You can now run “gitdiff” from a shell to open the current repository, or “gitdiff <path>”.")
+              "You can now run “jrev” in a repository to review it, or “jrev <path>”.")
     }
 
     private static func quoted(_ s: String) -> String {
