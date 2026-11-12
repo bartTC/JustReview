@@ -38,11 +38,6 @@ struct ContentView: View {
                 }
                 .help("Refresh (⇧⌘R)")
                 .disabled(model.root == nil)
-
-                Button { WindowRouter.shared.chooseRepository(preferring: handle) } label: {
-                    Label("Open Repository", systemImage: "folder")
-                }
-                .help("Open Repository (⌘O)")
             }
         }
         .dropDestination(for: URL.self) { urls, _ in
@@ -91,6 +86,11 @@ struct FileListView: View {
                 }
                 .toggleStyle(.button)
                 .help("Show all files, not just changed ones (⇧⌘A)")
+
+                Button { WindowRouter.shared.chooseRepository(preferring: handle) } label: {
+                    Label("Open Repository", systemImage: "folder")
+                }
+                .help("Open Repository (⌘O)")
             }
         }
         .overlay {
