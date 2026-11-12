@@ -47,6 +47,7 @@ struct JustReviewApp: App {
         }
         // Don't bring back old (often empty) windows on launch; jrev decides what to show.
         .restorationBehavior(.disabled)
+        .defaultSize(width: 900, height: 700)
         .commands { AppCommands() }
 
         Settings {
