@@ -3,6 +3,9 @@
 A macOS app for reviewing the changes in a git repository and writing review notes for the LLM
 of your choice.
 
+**[Download the latest release](https://github.com/bartTC/JustReview/releases/latest)** for
+macOS 15 or later on Apple Silicon.
+
 ![JustReview in light mode, stacked diff with annotations](docs/screenshot-light.png)
 
 ![JustReview in dark mode, side-by-side diff with annotations](docs/screenshot-dark.png)
@@ -35,9 +38,9 @@ of your choice.
 
 Requires macOS 15 or later on Apple Silicon.
 
-Download the latest `JustReview-x.y.z.zip` from
-[Releases](https://github.com/bartTC/JustReview/releases), unzip it and move `JustReview.app`
-to Applications. Or build it yourself with the Xcode Command Line Tools:
+Download `JustReview-x.y.z.zip` from the
+[latest release](https://github.com/bartTC/JustReview/releases/latest), unzip it and move
+`JustReview.app` to Applications. Or build it yourself with the Xcode Command Line Tools:
 
     ./build.sh                # builds build/JustReview.app
 
