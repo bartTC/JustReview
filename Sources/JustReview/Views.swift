@@ -332,6 +332,8 @@ struct DiffDetailView: View {
             let digits = max(String(diff.maxLineNumber).count, 2)
             let gutter = CGFloat(digits) * FontPrefs.digitWidth(nsFont) + 12
             let font = Font(nsFont as CTFont)
+            // A file without a diff (Show All Files) has one line-number column and no sides.
+            let layout: DiffMode = change.isUnchanged ? .unified : mode
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -341,10 +343,11 @@ struct DiffDetailView: View {
                                 .foregroundStyle(.secondary)
                                 .padding(8)
                         }
-                        switch mode {
+                        switch layout {
                         case .unified:
                             ForEach(diff.unified) {
-                                UnifiedRowView(model: model, path: change.path, row: $0, gutter: gutter)
+                                UnifiedRowView(model: model, path: change.path, row: $0, gutter: gutter,
+                                               singleNumber: change.isUnchanged)
                             }
                         case .split:
                             ForEach(diff.split) {
@@ -359,10 +362,12 @@ struct DiffDetailView: View {
                     .environment(\.diffLineNumberColor, theme.lineNumber.map { Color(nsColor: $0) })
                     .foregroundStyle(theme.text.map { Color(nsColor: $0) } ?? Color.primary)
                 }
-                .id("\(change.id)|\(mode.rawValue)") // reset scroll position on file/mode change
+                .id("\(change.id)|\(layout.rawValue)") // reset scroll position on file/mode change
                 .background(codeBackground)
-                .onAppear { scrollIfRequested(proxy, diff: diff, path: change.path) }
-                .onChange(of: model.scrollRequest) { scrollIfRequested(proxy, diff: diff, path: change.path) }
+                .onAppear { scrollIfRequested(proxy, diff: diff, path: change.path, layout: layout) }
+                .onChange(of: model.scrollRequest) {
+                    scrollIfRequested(proxy, diff: diff, path: change.path, layout: layout)
+                }
             }
         }
     }
@@ -385,9 +390,9 @@ struct DiffDetailView: View {
     }
 
     /// Jump to an annotated line when one is picked in the annotations pane.
-    private func scrollIfRequested(_ proxy: ScrollViewProxy, diff: RenderedDiff, path: String) {
+    private func scrollIfRequested(_ proxy: ScrollViewProxy, diff: RenderedDiff, path: String, layout: DiffMode) {
         guard let req = model.scrollRequest, req.path == path else { return }
-        let rowID: Int? = switch mode {
+        let rowID: Int? = switch layout {
         case .unified: diff.unified.first { $0.key == req.key }?.id
         case .split: diff.split.first { $0.left?.key == req.key || $0.right?.key == req.key }?.id
         }
@@ -481,6 +486,8 @@ struct UnifiedRowView: View {
     let path: String
     let row: UnifiedRow
     let gutter: CGFloat
+    /// One line-number column (file shown without a diff) instead of old + new.
+    var singleNumber = false
 
     var body: some View {
         if let header = row.header {
@@ -489,7 +496,7 @@ struct UnifiedRowView: View {
             let target = EditTarget(path: path, key: key, rowID: row.id, column: 0)
             VStack(spacing: 0) {
                 HStack(alignment: .top, spacing: 0) {
-                    LineNumber(number: row.oldNo, width: gutter)
+                    if !singleNumber { LineNumber(number: row.oldNo, width: gutter) }
                     LineNumber(number: row.newNo, width: gutter)
                     Text(DiffStyle.marker(row.kind))
                         .foregroundStyle(.secondary)
@@ -502,7 +509,7 @@ struct UnifiedRowView: View {
                 .modifier(AnnotatableLine(model: model, target: target, text: row.text))
 
                 if let note = model.annotation(path: path, key: key) {
-                    AnnotationNoteView(annotation: note, indent: gutter * 2 + 24,
+                    AnnotationNoteView(annotation: note, indent: gutter * (singleNumber ? 1 : 2) + 24,
                                        onEdit: { model.editing = target },
                                        onDelete: { model.removeAnnotation(note) })
                 }
