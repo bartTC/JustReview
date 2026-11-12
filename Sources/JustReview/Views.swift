@@ -193,12 +193,15 @@ struct FileListView: View {
 
     @StateObject private var pendingReveal = Box(false)
 
-    /// Clicking a file another tab already shows switches to that tab instead of duplicating it.
+    /// The selected file; ⌘-click opens a file in its own window instead.
     private var listSelection: Binding<String?> {
         Binding(
             get: { model.selection },
             set: { path in
-                if NSEvent.modifierFlags.contains(.command) {
+                // Only a ⌘-click: ⌘↑/⌘↓ also move the selection while ⌘ is held.
+                let event = NSApp.currentEvent
+                let isClick = event.map { [.leftMouseDown, .leftMouseUp].contains($0.type) } ?? false
+                if isClick, NSEvent.modifierFlags.contains(.command) {
                     // ⌘-click opens the file in a window of its own; this window keeps its file.
                     if let path { openInNewWindow(path) }
                     model.objectWillChange.send()   // snap the list back to this window's file
