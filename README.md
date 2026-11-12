@@ -53,6 +53,7 @@ Tool…** to get the `jrev` command:
 | ⌘C | Copy annotations as Markdown |
 | ⌘R | Clear annotations |
 | ⌘O | Open a repository |
+| ⌥⌘O | Open the file in its default app |
 
 ## License
 

@@ -153,6 +153,8 @@ struct FileListView: View {
         .contextMenu(forSelectionType: String.self) { paths in
             if let path = paths.first {
                 Button("Open in New Window") { openInNewWindow(path) }
+                Divider()
+                FileOpenMenuItems(root: model.root, path: path)
             }
         }
         .onChange(of: showAll) { Task { await model.refresh() } }
@@ -428,6 +430,7 @@ struct DiffDetailView: View {
             .contentShape(Rectangle())
             .onTapGesture(count: 2) { model.editing = target }
             .help("Double-click to annotate this file")
+            .contextMenu { FileOpenMenuItems(root: model.root, path: change.path) }
             Text(change.statusDescription)
                 .font(.caption)
                 .padding(.horizontal, 6).padding(.vertical, 2)

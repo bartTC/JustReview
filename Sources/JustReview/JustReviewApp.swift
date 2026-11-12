@@ -54,6 +54,10 @@ struct JustReviewApp: App {
 /// Menu commands act on the focused window's repository.
 struct AppCommands: Commands {
     private var isEditingText: Bool { NSApp.keyWindow?.firstResponder is NSText }
+    private var selectedFileExists: Bool {
+        guard let model, let root = model.root, let path = model.selection else { return false }
+        return FileActions.exists(path, in: root)
+    }
 
     private func send(_ action: Selector) {
         NSApp.sendAction(action, to: nil, from: nil)
@@ -73,6 +77,20 @@ struct AppCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("Open Repository…") { WindowRouter.shared.chooseRepository(preferring: handle) }
                 .keyboardShortcut("o")
+            Divider()
+            Button("Open File in Default App") {
+                if let model, let root = model.root, let path = model.selection {
+                    FileActions.openInDefaultApp(path, in: root)
+                }
+            }
+            .keyboardShortcut("o", modifiers: [.option, .command])
+            .disabled(!selectedFileExists)
+            Button("Reveal File in Finder") {
+                if let model, let root = model.root, let path = model.selection {
+                    FileActions.revealInFinder(path, in: root)
+                }
+            }
+            .disabled(!selectedFileExists)
         }
         // The file list can't be hidden: drop "Show/Hide Sidebar".
         CommandGroup(replacing: .sidebar) {}
