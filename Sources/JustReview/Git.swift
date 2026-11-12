@@ -12,7 +12,13 @@ struct FileChange: Identifiable, Hashable {
     var directory: String { (path as NSString).deletingLastPathComponent }
     var isUntracked: Bool { status == "?" }
 
-    var statusLabel: String { status == "?" ? "N" : String(status) }
+    var statusLabel: String {
+        switch status {
+        case "?": return "U" // untracked
+        case "U": return "!" // merge conflict (git's own letter would clash with untracked)
+        default: return String(status)
+        }
+    }
 
     var statusDescription: String {
         switch status {

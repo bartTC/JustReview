@@ -73,7 +73,7 @@ struct FileListView: View {
     var body: some View {
         let font = Font(FontPrefs.listFont(family: family, size: size) as CTFont)
         List(model.changes, selection: $model.selection) { change in
-            FileRow(change: change, font: font).tag(change.id)
+            FileRow(change: change, font: font, size: size).tag(change.id)
         }
         .overlay {
             if model.root == nil {
@@ -100,13 +100,11 @@ struct FileListView: View {
 struct FileRow: View {
     let change: FileChange
     let font: Font
+    let size: Double
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text(change.statusLabel)
-                .font(font.monospaced().bold())
-                .foregroundStyle(statusColor)
-                .frame(minWidth: 14)
+        HStack(spacing: 7) {
+            StatusBadge(label: change.statusLabel, size: size)
             Text(change.fileName)
                 .lineLimit(1)
             if !change.directory.isEmpty {
@@ -119,15 +117,23 @@ struct FileRow: View {
         .font(font)
         .help("\(change.statusDescription): \(change.oldPath.map { "\($0) → " } ?? "")\(change.path)")
     }
+}
 
-    private var statusColor: Color {
-        switch change.status {
-        case "A", "?": return .green
-        case "D", "U": return .red
-        case "R", "C": return .blue
-        case "T": return .purple
-        default: return .orange
-        }
+/// Muted status letter (M, A, D, R, U…) in a small outlined box, scaled to the list font.
+private struct StatusBadge: View {
+    let label: String
+    let size: Double
+
+    var body: some View {
+        let box = (size * 1.15).rounded()
+        Text(label)
+            .font(.system(size: size * 0.68, weight: .semibold, design: .rounded))
+            .foregroundStyle(.secondary)
+            .frame(width: box, height: box)
+            .overlay(
+                RoundedRectangle(cornerRadius: box * 0.22)
+                    .strokeBorder(.secondary.opacity(0.5), lineWidth: 1)
+            )
     }
 }
 
