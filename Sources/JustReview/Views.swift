@@ -95,11 +95,6 @@ struct FileListView: View {
                     Text("Open a git repository, drop a folder here, or run “jrev” in a repository.")
                 } actions: {
                     Button("Open Repository…") { WindowRouter.shared.chooseRepository(preferring: handle) }
-                    if let last = UserDefaults.standard.string(forKey: "lastRepo") {
-                        Button("Open “\((last as NSString).lastPathComponent)”") {
-                            WindowRouter.shared.open(URL(fileURLWithPath: last), preferring: handle)
-                        }
-                    }
                 }
             } else if model.changes.isEmpty && !showAll {
                 ContentUnavailableView("No Changes", systemImage: "checkmark.circle",

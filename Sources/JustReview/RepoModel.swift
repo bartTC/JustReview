@@ -50,7 +50,6 @@ final class RepoModel: ObservableObject {
             changes = []
             rendered = nil
             selection = nil
-            UserDefaults.standard.set(top.path, forKey: "lastRepo")
             loadAnnotations()
             watcher = FileWatcher(root: top) { [weak self] in
                 Task { await self?.refresh() }
