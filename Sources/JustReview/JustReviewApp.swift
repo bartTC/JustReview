@@ -4,10 +4,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         migrateDefaultsFromGitDiff()
         AppAppearance.current.apply()
-        // New tabs should open directly as tabs (no separate window first). AppKit only does that
-        // when the tabbing preference is "always"; set it for this app (read once at launch).
-        // Which windows actually join is controlled via tabbing identifiers (WindowRouter).
-        UserDefaults.standard.set("always", forKey: "AppleWindowTabbingMode")
+        // No window tabs: one window per repository, files open in their own windows.
+        NSWindow.allowsAutomaticWindowTabbing = false
+        UserDefaults.standard.removeObject(forKey: "AppleWindowTabbingMode") // set by older versions
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -15,11 +14,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
 
-    }
-
-    /// The "+" button in a native tab bar: a new tab of the focused repository.
-    @objc func newWindowForTab(_ sender: Any?) {
-        Task { @MainActor in WindowRouter.shared.openTabForKeyWindow() }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -77,19 +71,12 @@ struct AppCommands: Commands {
             Button("Install Command Line Tool…") { CLIInstaller.install() }
         }
         CommandGroup(replacing: .newItem) {
-            Button("New Tab") {
-                if let model, let root = model.root {
-                    WindowRouter.shared.openTab(root: root, file: model.selection, from: handle)
-                }
-            }
-            .keyboardShortcut("t")
-            .disabled(model?.root == nil)
             Button("Open Repository…") { WindowRouter.shared.chooseRepository(preferring: handle) }
                 .keyboardShortcut("o")
         }
         // The file list can't be hidden: drop "Show/Hide Sidebar".
         CommandGroup(replacing: .sidebar) {}
-        // Read-only viewer: no save/revert, just Close (⌘W closes the tab or window).
+        // Read-only viewer: no save/revert, just Close.
         CommandGroup(replacing: .saveItem) {
             Button("Close") { NSApp.keyWindow?.performClose(nil) }
                 .keyboardShortcut("w")

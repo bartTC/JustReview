@@ -1,12 +1,12 @@
 import AppKit
 import SwiftUI
 
-/// Scene value of a repository window. Each native tab is its own window; `id` lets several tabs
-/// show the same repository, `file` is the file a new tab starts on.
+/// Scene value of a repository window: the repository, the file to show first, and whether the
+/// window shows just that file's diff ("Open in New Window"). `id` keeps windows distinct.
 struct RepoTab: Codable, Hashable {
     var root: String
     var file: String?
-    /// Opened on its own to show just the diff ("Open in New Window").
+    /// Opened on its own to show just the diff (no file list, no annotations pane).
     var standalone = false
     var id = UUID()
 }
@@ -16,40 +16,8 @@ struct RepoTab: Codable, Hashable {
 final class WindowHandle: ObservableObject {
     /// Repository root shown by the window (nil = empty window).
     var path: String?
-    /// File shown in the window (its tab).
-    var selection: String?
-    /// Whether the window shows the file list and annotations pane. A tab dragged out of its
-    /// group shows just the diff; the tabs left behind keep the full layout.
+    /// Whether the window shows the file list and annotations pane (false: just one file's diff).
     @Published var showsChrome = true
-
-    private var wasGrouped = false
-    private var groupFrame = NSRect.zero
-
-    /// Re-evaluates after tab-group changes (drag out/in, merge, Move Tab to New Window, close).
-    /// Grouped tabs show the full layout. A tab that left its group decides once: if it moved
-    /// away from where the group was, it was dragged out (just the diff); if it didn't move by
-    /// the time the mouse is up, it is what's left of the group (full layout).
-    func updateChrome() {
-        guard let window else { return }
-        if (window.tabbedWindows?.count ?? 1) > 1 {
-            wasGrouped = true
-            groupFrame = (window.tabGroup?.selectedWindow ?? window).frame
-            setChrome(true)
-        } else if wasGrouped {
-            let moved = abs(window.frame.minX - groupFrame.minX) > 2 || abs(window.frame.maxY - groupFrame.maxY) > 2
-            if moved {
-                wasGrouped = false
-                setChrome(false)
-            } else if NSEvent.pressedMouseButtons == 0 {
-                wasGrouped = false
-                setChrome(true)
-            }
-        }
-    }
-
-    private func setChrome(_ shows: Bool) {
-        if showsChrome != shows { showsChrome = shows }
-    }
     weak var window: NSWindow?
     /// Points the window at a repository (sets the window's scene value).
     var adopt: (String) -> Void = { _ in }
@@ -128,73 +96,19 @@ final class WindowRouter {
         }
     }
 
-    // MARK: Native tabs
-
-    /// Windows that new tabs should join, keyed by the new tab's id.
-    private var tabParents: [UUID: NSWindow] = [:]
-
-    /// Another tab/window of the repository that already shows `file`.
-    func existingTab(root: URL, file: String, excluding handle: WindowHandle?) -> WindowHandle? {
-        handles.first { $0 !== handle && $0.path == root.path && $0.selection == file && $0.window != nil }
+    /// Opens one file's diff in a window of its own (⌘-click, Open in New Window).
+    func openFileWindow(root: URL, file: String) {
+        openWindow?(value: RepoTab(root: root.path, file: file, standalone: true))
     }
 
-    /// Brings a window (or native tab) to the front.
-    func show(_ handle: WindowHandle) { focus(handle) }
-
-    /// Opens another native tab of the same repository (⌘T, "+", Open in New Tab) — or, if a tab
-    /// already shows that file, switches to it instead.
-    func openTab(root: URL, file: String?, from handle: WindowHandle?) {
-        if let file, let existing = existingTab(root: root, file: file, excluding: handle) {
-            focus(existing)
-            return
-        }
-        let tab = RepoTab(root: root.path, file: file)
-        if let window = handle?.window {
-            tabParents[tab.id] = window
-            // AppKit tabs a new window into the key window when their tabbing identifiers match
-            // (the app's tabbing preference is "always", see AppDelegate). Repository windows
-            // normally carry "repo:<root>", which a brand-new window doesn't; give the parent the
-            // new window's default identifier for a moment so the tab appears in place — no
-            // flash of a separate window. `configureTabbing` restores the identifier.
-            if let defaultIdentifier { window.tabbingIdentifier = defaultIdentifier }
-            window.makeKeyAndOrderFront(nil)
-        }
-        openWindow?(value: tab)
-    }
-
-    /// "+" in the tab bar / New Tab with no repository window focused.
-    func openTabForKeyWindow() {
-        guard let handle = handles.first(where: { $0.window == NSApp.keyWindow }),
-              let path = handle.path else { NSSound.beep(); return }
-        openTab(root: URL(fileURLWithPath: path), file: nil, from: handle)
-    }
-
-    /// Called once a repository window exists: tags it for its repository's tab group and, if it
-    /// was opened as a tab, adds it to the window it was opened from.
-    /// SwiftUI's tabbing identifier for new repository windows (learned from the first one).
-    private var defaultIdentifier: String?
-
-    func configureTabbing(_ window: NSWindow, tab: RepoTab) {
-        if defaultIdentifier == nil { defaultIdentifier = window.tabbingIdentifier }
-        let identifier = "repo:" + tab.root
-        let parent = tabParents.removeValue(forKey: tab.id)
-        // The repository's first window gets its last size and position back (tabs join their
-        // group's frame; diff-only windows keep the default).
-        if parent == nil, !tab.standalone,
-           !handles.contains(where: { $0.path == tab.root && $0.window != nil && $0.window !== window }) {
+    /// Called once a window shows a repository: the repository's main window gets its last
+    /// size and position back (file windows open at the default size).
+    func windowOpened(_ window: NSWindow, tab: RepoTab) {
+        window.tabbingMode = .disallowed
+        if !tab.standalone,
+           !handles.contains(where: { $0.path == tab.root && $0.showsChrome && $0.window != nil && $0.window !== window }) {
             restoreFrame(window, root: tab.root)
         }
-        if let parent, parent !== window {
-            // Fallback if AppKit didn't tab it in by itself.
-            if !(parent.tabbedWindows ?? []).contains(window) {
-                parent.addTabbedWindow(window, ordered: .above)
-                window.makeKeyAndOrderFront(nil)
-            }
-            for member in parent.tabbedWindows ?? [parent] { member.tabbingIdentifier = identifier }
-        }
-        // Per-repository identifier: new repositories / "Open in New Window" don't auto-tab
-        // into it, and Merge All Windows only merges tabs of the same repository.
-        window.tabbingIdentifier = identifier
     }
 
     // MARK: Window frames (remembered per repository)
@@ -250,8 +164,6 @@ struct WindowReader: NSViewRepresentable {
 
 /// A repository window: owns its model and keeps the router informed.
 struct RepoWindow: View {
-    private func updateChrome() { handle.updateChrome() }
-
     private func saveFrame(_ note: Notification) {
         guard let window = note.object as? NSWindow, window === handle.window else { return }
         WindowRouter.shared.saveFrame(of: handle)
@@ -260,7 +172,7 @@ struct RepoWindow: View {
     @Binding var tab: RepoTab?
     @StateObject private var model = RepoModel()
     @StateObject private var handle = WindowHandle()
-    @StateObject private var tabbedFor = Box<String?>(nil)   // repo the tabbing was set up for
+    @StateObject private var tabbedFor = Box<String?>(nil)   // repo the window was set up for
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -270,8 +182,7 @@ struct RepoWindow: View {
                 handle.window = window
                 if let window, let tab, tabbedFor.value != tab.root {
                     tabbedFor.value = tab.root
-                    WindowRouter.shared.configureTabbing(window, tab: tab)
-                    updateChrome()
+                    WindowRouter.shared.windowOpened(window, tab: tab)
                 }
             })
             .focusedSceneObject(model)
@@ -283,25 +194,11 @@ struct RepoWindow: View {
                 WindowRouter.shared.register(handle, openWindow: openWindow)
             }
             .onDisappear { WindowRouter.shared.unregister(handle) }
-            .onChange(of: tab) {
-                handle.path = tab?.root
-                updateChrome()
-            }
-            // Tab groups change when tabs are dragged out/in, merged, closed: re-evaluate then.
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in updateChrome() }
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didMoveNotification)) { note in
-                updateChrome()
-                saveFrame(note)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResizeNotification)) { note in
-                saveFrame(note)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in updateChrome() }
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
-                saveFrame(note)
-                DispatchQueue.main.async { updateChrome() }
-            }
-            .onChange(of: model.selection) { handle.selection = model.selection }
+            .onChange(of: tab) { handle.path = tab?.root }
+            // Remember the main window's size and position for its repository.
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didMoveNotification)) { saveFrame($0) }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResizeNotification)) { saveFrame($0) }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { saveFrame($0) }
             // Folders opened from outside (jrev → `open -a JustReview <dir>`, Finder, Dock) are
             // delivered to an existing window instead of spawning one; SwiftUI only creates a
             // window when none exists. The router then focuses/reuses/opens the right window.

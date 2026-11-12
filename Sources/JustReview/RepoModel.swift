@@ -47,7 +47,7 @@ final class RepoModel: ObservableObject {
 
     var selectedChange: FileChange? {
         guard let selection else { return nil }
-        // A tab or pinned file that isn't changed (any more) is shown as an unchanged file.
+        // A file opened in its own window that isn't changed (any more) is shown as an unchanged file.
         return changes.first { $0.id == selection } ?? unchanged.first { $0.id == selection }
             ?? FileChange(status: " ", path: selection, oldPath: nil)
     }

@@ -26,7 +26,8 @@ of your choice.
 - **Themes:** every [Helix](https://docs.helix-editor.com/themes.html) theme is included. Pick
   one for light mode and one for dark mode, or add your own.
 - **Live:** the diff updates as files change on disk.
-- **Native macOS:** window tabs, one window per repository, light and dark mode.
+- **Native macOS:** one window per repository, open any file's diff in its own window, light
+  and dark mode.
 
 ## Install
 
@@ -47,7 +48,7 @@ Tool…** to get the `jrev` command:
 | ⌘1 / ⌘2 | Stacked / side by side |
 | ⌥Z | Wrap lines |
 | ⇧⌘A | Show all files |
-| ⌘T | New tab (double-click a file to open it in one) |
+| ⌘-click | Open a file's diff in its own window |
 | ⌥⌘A | Show or hide annotations |
 | ⌘C | Copy annotations as Markdown |
 | ⌘R | Clear annotations |

@@ -3,7 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var model: RepoModel
     let handle: WindowHandle
-    /// File list + annotations pane; off for a tab dragged out on its own (just the diff).
+    /// File list + annotations pane; off for a file opened in its own window (just the diff).
     var showsChrome = true
     @AppStorage("diffMode") private var mode: DiffMode = .unified
     @AppStorage("wrapLines") private var wrapLines = true
@@ -67,7 +67,7 @@ struct ContentView: View {
         // The toolbar's tinted detail section doesn't line up with the split view's divider
         // on recent macOS; hiding the toolbar background removes the misaligned edge.
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-        // The window title names the file (it labels the native tab) but isn't drawn in the
+        // The window title names the file (Window menu, Mission Control) but isn't drawn in the
         // toolbar; the toolbar shows the repository and its branch instead.
         .navigationTitle(model.selection.map { ($0 as NSString).lastPathComponent } ?? model.repoName)
         .toolbar(removing: .title)
@@ -123,12 +123,11 @@ struct FileListView: View {
     @AppStorage(FontPrefs.listFamily) private var family = ""
     @AppStorage(FontPrefs.listSize) private var size = FontPrefs.defaultListSize
     @AppStorage("showAllFiles") private var showAll = false
-    @Environment(\.openWindow) private var openWindow
 
-    /// A new native tab of this repository showing `path` (drag the tab out for its own window).
-    private func openInNewTab(_ path: String) {
+    /// The file's diff in a window of its own (no file list, no annotations pane).
+    private func openInNewWindow(_ path: String) {
         guard let root = model.root else { return }
-        WindowRouter.shared.openTab(root: root, file: path, from: handle)
+        WindowRouter.shared.openFileWindow(root: root, file: path)
     }
 
     /// Folders the user expanded/collapsed by hand; others use the default (see `isExpanded`).
@@ -142,7 +141,7 @@ struct FileListView: View {
             FileTreeRows(nodes: tree, font: font, size: size, isExpanded: isExpanded)
         }
         // Reveal this tab's file when the tab/window becomes active or shows another file
-        // (and once the list has loaded, for a new tab whose file wasn't listed yet).
+        // (and once the list has loaded, if the file wasn't listed yet).
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
             if (note.object as? NSWindow) === handle.window { reveal(model.selection, in: tree, proxy: proxy) }
         }
@@ -150,16 +149,11 @@ struct FileListView: View {
         .onChange(of: tree.count + model.changes.count + model.unchanged.count) {
             if pendingReveal.value { reveal(model.selection, in: tree, proxy: proxy) }
         }
-        // Double-click (or Return) opens the file in a new native tab.
+        // Right-click (or ⌘-click, see listSelection): the file's diff in a window of its own.
         .contextMenu(forSelectionType: String.self) { paths in
             if let path = paths.first {
-                Button("Open in New Tab") { openInNewTab(path) }
-                Button("Open in New Window") {
-                    if let root = model.root { openWindow(value: RepoTab(root: root.path, file: path, standalone: true)) }
-                }
+                Button("Open in New Window") { openInNewWindow(path) }
             }
-        } primaryAction: { paths in
-            paths.forEach(openInNewTab)
         }
         .onChange(of: showAll) { Task { await model.refresh() } }
         // File-list controls live in the sidebar's part of the toolbar (right-aligned).
@@ -202,10 +196,10 @@ struct FileListView: View {
         Binding(
             get: { model.selection },
             set: { path in
-                if let path, let root = model.root,
-                   let other = WindowRouter.shared.existingTab(root: root, file: path, excluding: handle) {
-                    WindowRouter.shared.show(other)
-                    model.objectWillChange.send()   // snap this list back to its own file
+                if NSEvent.modifierFlags.contains(.command) {
+                    // ⌘-click opens the file in a window of its own; this window keeps its file.
+                    if let path { openInNewWindow(path) }
+                    model.objectWillChange.send()   // snap the list back to this window's file
                 } else {
                     model.selection = path
                 }
