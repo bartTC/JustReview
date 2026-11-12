@@ -182,6 +182,44 @@ final class Box<T>: ObservableObject {
 
 // MARK: - Popover editor
 
+/// Puts the keyboard focus into the popover's text editor as soon as the popover is on screen.
+/// (`@FocusState` set in `onAppear` is often lost: the popover's window isn't key yet.)
+private struct FocusTextViewOnAppear: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Probe() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    final class Probe: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil else { return }
+            // Now and once the popover has finished animating in: focusing during the animation
+            // leaves the caret undrawn until the first keystroke.
+            for delay in [0.0, 0.2] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.focus() }
+            }
+        }
+
+        private func focus() {
+            guard let window, let content = window.contentView,
+                  let textView = Self.firstTextView(in: content) else { return }
+            window.makeKey()
+            if window.firstResponder !== textView {
+                window.makeFirstResponder(textView)
+                // Caret at the end of an existing note.
+                textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
+            }
+            textView.updateInsertionPointStateAndRestartTimer(true)
+            textView.needsDisplay = true
+        }
+
+        private static func firstTextView(in view: NSView) -> NSTextView? {
+            if let textView = view as? NSTextView, textView.isEditable { return textView }
+            for sub in view.subviews { if let found = firstTextView(in: sub) { return found } }
+            return nil
+        }
+    }
+}
+
 struct AnnotationEditor: View {
     @ObservedObject var model: RepoModel
     let target: EditTarget
@@ -205,6 +243,7 @@ struct AnnotationEditor: View {
                 .frame(width: 360, height: 110)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(nsColor: .separatorColor)))
+                .background(FocusTextViewOnAppear())
             HStack {
                 if existing != nil {
                     Button("Delete", role: .destructive) {
