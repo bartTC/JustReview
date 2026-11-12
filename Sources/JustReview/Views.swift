@@ -3,22 +3,30 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var model: RepoModel
     let handle: WindowHandle
+    /// File list + annotations pane; off for a tab dragged out on its own (just the diff).
+    var showsChrome = true
     @AppStorage("diffMode") private var mode: DiffMode = .unified
     @AppStorage("wrapLines") private var wrapLines = true
 
     var body: some View {
         // Annotations pane sits below the split view and takes real space
         // (a safe-area inset would let the split view's columns scroll underneath it).
-        VStack(spacing: 0) {
-            // The file list is essential: always visible, no toggle, can't be collapsed.
-            NavigationSplitView(columnVisibility: .constant(.all)) {
-                FileListView(model: model, handle: handle)
-                    .navigationSplitViewColumnWidth(min: 200, ideal: 280, max: 500)
-                    .toolbar(removing: .sidebarToggle)
-            } detail: {
+        Group {
+            if showsChrome {
+                VStack(spacing: 0) {
+                    // The file list is essential: always visible, no toggle, can't be collapsed.
+                    NavigationSplitView(columnVisibility: .constant(.all)) {
+                        FileListView(model: model, handle: handle)
+                            .navigationSplitViewColumnWidth(min: 200, ideal: 280, max: 500)
+                            .toolbar(removing: .sidebarToggle)
+                    } detail: {
+                        DiffDetailView(model: model, mode: mode)
+                    }
+                    AnnotationsPane(model: model)
+                }
+            } else {
                 DiffDetailView(model: model, mode: mode)
             }
-            AnnotationsPane(model: model)
         }
         // The toolbar's tinted detail section doesn't line up with the split view's divider
         // on recent macOS; hiding the toolbar background removes the misaligned edge.
@@ -90,15 +98,25 @@ struct FileListView: View {
     var body: some View {
         let font = Font(FontPrefs.listFont(family: family, size: size) as CTFont)
         let tree = FileTree.build(model.changes + (showAll ? model.unchanged : []))
-        List(selection: $model.selection) {
+        ScrollViewReader { proxy in
+        List(selection: listSelection) {
             FileTreeRows(nodes: tree, font: font, size: size, isExpanded: isExpanded)
+        }
+        // Reveal this tab's file when the tab/window becomes active or shows another file
+        // (and once the list has loaded, for a new tab whose file wasn't listed yet).
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            if (note.object as? NSWindow) === handle.window { reveal(model.selection, in: tree, proxy: proxy) }
+        }
+        .onChange(of: model.selection) { reveal(model.selection, in: tree, proxy: proxy) }
+        .onChange(of: tree.count + model.changes.count + model.unchanged.count) {
+            if pendingReveal.value { reveal(model.selection, in: tree, proxy: proxy) }
         }
         // Double-click (or Return) opens the file in a new native tab.
         .contextMenu(forSelectionType: String.self) { paths in
             if let path = paths.first {
                 Button("Open in New Tab") { openInNewTab(path) }
                 Button("Open in New Window") {
-                    if let root = model.root { openWindow(value: RepoTab(root: root.path, file: path)) }
+                    if let root = model.root { openWindow(value: RepoTab(root: root.path, file: path, standalone: true)) }
                 }
             }
         } primaryAction: { paths in
@@ -121,6 +139,7 @@ struct FileListView: View {
                 .help("Open Repository (⌘O)")
             }
         }
+        }
         .overlay {
             if model.root == nil {
                 ContentUnavailableView {
@@ -134,6 +153,36 @@ struct FileListView: View {
                 ContentUnavailableView("No Changes", systemImage: "checkmark.circle",
                                        description: Text("Nothing differs from HEAD."))
             }
+        }
+    }
+
+    @StateObject private var pendingReveal = Box(false)
+
+    /// Clicking a file another tab already shows switches to that tab instead of duplicating it.
+    private var listSelection: Binding<String?> {
+        Binding(
+            get: { model.selection },
+            set: { path in
+                if let path, let root = model.root,
+                   let other = WindowRouter.shared.existingTab(root: root, file: path, excluding: handle) {
+                    WindowRouter.shared.show(other)
+                    model.objectWillChange.send()   // snap this list back to its own file
+                } else {
+                    model.selection = path
+                }
+            }
+        )
+    }
+
+    /// Expands the folders leading to `path` and scrolls its row into view.
+    private func reveal(_ path: String?, in tree: [FileTreeNode], proxy: ScrollViewProxy) {
+        guard let path else { return }
+        let listed = model.changes.contains { $0.path == path } || model.unchanged.contains { $0.path == path }
+        pendingReveal.value = !listed       // not in the list yet: try again once it loads
+        guard listed else { return }
+        for folder in FileTree.folders(containing: path, in: tree) { expansion.value[folder] = true }
+        DispatchQueue.main.async {
+            withAnimation { proxy.scrollTo(FileTreeNode.ID(path: path)) }
         }
     }
 
@@ -165,6 +214,14 @@ enum FileTree {
     private final class Folder {
         var folders: [String: Folder] = [:]
         var files: [FileChange] = []
+    }
+
+    /// Paths of the (possibly compacted) folder nodes on the way to a file.
+    static func folders(containing path: String, in nodes: [FileTreeNode]) -> [String] {
+        for node in nodes where node.change == nil && path.hasPrefix(node.path + "/") {
+            return [node.path] + folders(containing: path, in: node.children)
+        }
+        return []
     }
 
     static func build(_ files: [FileChange]) -> [FileTreeNode] {
