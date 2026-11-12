@@ -12,6 +12,12 @@ final class RepoModel: ObservableObject {
     @Published private(set) var changes: [FileChange] = []
     @Published private(set) var rendered: RenderedDiff?
     @Published var error: String?
+    @Published var editing: EditTarget?
+    @Published var scrollRequest: ScrollRequest?
+    /// Review notes. Kept in the app's preferences per repository — never written into the repo.
+    @Published var annotations: [Annotation] = [] {
+        didSet { saveAnnotations() }
+    }
     @Published var selection: String? {
         didSet { if oldValue != selection { loadDiff() } }
     }
@@ -71,6 +77,7 @@ final class RepoModel: ObservableObject {
             rendered = nil
             selection = nil
             UserDefaults.standard.set(top.path, forKey: "lastRepo")
+            loadAnnotations()
             watcher = FileWatcher(root: top) { [weak self] in
                 Task { await self?.refresh() }
             }
@@ -117,6 +124,27 @@ final class RepoModel: ObservableObject {
     }
 
     func reloadDiff() { loadDiff() }
+
+    // MARK: Annotation persistence
+
+    private var annotationsKey: String? { root.map { "annotations:" + $0.path } }
+
+    private func loadAnnotations() {
+        guard let key = annotationsKey,
+              let data = UserDefaults.standard.data(forKey: key),
+              let list = try? JSONDecoder().decode([Annotation].self, from: data)
+        else { annotations = []; return }
+        annotations = list
+    }
+
+    private func saveAnnotations() {
+        guard let key = annotationsKey else { return }
+        if annotations.isEmpty {
+            UserDefaults.standard.removeObject(forKey: key)
+        } else if let data = try? JSONEncoder().encode(annotations) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
 
     private func loadDiff() {
         diffGeneration += 1

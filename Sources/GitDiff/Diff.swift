@@ -91,11 +91,21 @@ enum DiffParser {
 
 // MARK: - Render model
 
-enum RowKind { case context, added, removed }
+enum RowKind: String { case context, added, removed }
+
+/// Identifies a line within a file's diff: removed lines by old line number,
+/// added and context lines by new line number.
+struct LineKey: Hashable, Codable {
+    let side: RowKind
+    let line: Int
+}
+
+extension RowKind: Codable {}
 
 struct UnifiedRow: Identifiable {
     let id: Int
     let header: String?
+    let key: LineKey?
     let kind: RowKind
     let oldNo: Int?
     let newNo: Int?
@@ -103,6 +113,7 @@ struct UnifiedRow: Identifiable {
 }
 
 struct SideCell {
+    let key: LineKey
     let kind: RowKind
     let number: Int?
     let text: AttributedString
@@ -166,7 +177,7 @@ enum DiffRenderer {
         var maxNo = 0, added = 0, removed = 0
 
         for hunk in diff.hunks {
-            unified.append(UnifiedRow(id: unified.count, header: hunk.header, kind: .context,
+            unified.append(UnifiedRow(id: unified.count, header: hunk.header, key: nil, kind: .context,
                                       oldNo: nil, newNo: nil, text: AttributedString()))
             split.append(SplitRow(id: split.count, header: hunk.header, left: nil, right: nil))
 
@@ -185,16 +196,16 @@ enum DiffRenderer {
                     addText[i] = attributed(add[i], highlight: b, color: DiffStyle.addedHL)
                 }
                 for (i, l) in rem.enumerated() {
-                    unified.append(UnifiedRow(id: unified.count, header: nil, kind: .removed,
+                    unified.append(UnifiedRow(id: unified.count, header: nil, key: key(l), kind: .removed,
                                               oldNo: l.oldNo, newNo: nil, text: remText[i]))
                 }
                 for (i, l) in add.enumerated() {
-                    unified.append(UnifiedRow(id: unified.count, header: nil, kind: .added,
+                    unified.append(UnifiedRow(id: unified.count, header: nil, key: key(l), kind: .added,
                                               oldNo: nil, newNo: l.newNo, text: addText[i]))
                 }
                 for i in 0..<max(rem.count, add.count) {
-                    let left = i < rem.count ? SideCell(kind: .removed, number: rem[i].oldNo, text: remText[i]) : nil
-                    let right = i < add.count ? SideCell(kind: .added, number: add[i].newNo, text: addText[i]) : nil
+                    let left = i < rem.count ? SideCell(key: key(rem[i]), kind: .removed, number: rem[i].oldNo, text: remText[i]) : nil
+                    let right = i < add.count ? SideCell(key: key(add[i]), kind: .added, number: add[i].newNo, text: addText[i]) : nil
                     split.append(SplitRow(id: split.count, header: nil, left: left, right: right))
                 }
                 rem.removeAll()
@@ -214,11 +225,11 @@ enum DiffRenderer {
                 case .context:
                     flush()
                     let t = attributed(line, highlight: nil, color: .clear)
-                    unified.append(UnifiedRow(id: unified.count, header: nil, kind: .context,
+                    unified.append(UnifiedRow(id: unified.count, header: nil, key: key(line), kind: .context,
                                               oldNo: line.oldNo, newNo: line.newNo, text: t))
                     split.append(SplitRow(id: split.count, header: nil,
-                                          left: SideCell(kind: .context, number: line.oldNo, text: t),
-                                          right: SideCell(kind: .context, number: line.newNo, text: t)))
+                                          left: SideCell(key: key(line), kind: .context, number: line.oldNo, text: t),
+                                          right: SideCell(key: key(line), kind: .context, number: line.newNo, text: t)))
                 }
             }
             flush()
@@ -227,6 +238,14 @@ enum DiffRenderer {
         return RenderedDiff(changeID: changeID, rawText: raw, unified: unified, split: split,
                             tabWidth: tabWidth, maxLineNumber: maxNo, added: added, removed: removed,
                             isBinary: diff.isBinary, notes: diff.notes)
+    }
+
+    private static func key(_ line: DiffLine) -> LineKey {
+        switch line.kind {
+        case .removed: return LineKey(side: .removed, line: line.oldNo ?? 0)
+        case .added: return LineKey(side: .added, line: line.newNo ?? 0)
+        case .context: return LineKey(side: .context, line: line.newNo ?? 0)
+        }
     }
 
     /// Expand tabs to the next tab stop (column-aware, like an editor does).

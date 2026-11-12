@@ -39,6 +39,12 @@ struct GitDiffApp: App {
                     .keyboardShortcut("r")
                 Divider()
             }
+            CommandGroup(after: .pasteboard) {
+                Divider()
+                Button("Copy Annotations") { model.copyAnnotations() }
+                    .keyboardShortcut("c", modifiers: [.command, .shift])
+                    .disabled(model.annotations.isEmpty)
+            }
         }
 
         Settings {

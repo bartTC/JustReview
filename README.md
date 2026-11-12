@@ -21,3 +21,11 @@ with ⌘O or by dropping a folder on the window.
 
 - ⌘1 stacked, ⌘2 side by side, ⌘R refresh (rarely needed: the repo is watched and reloads automatically)
 - ⌘, Settings: font family/size for the file list and diff view, tab width
+- Double-click a diff line (or right-click → Add Annotation…) to annotate it; ⌘↩ saves.
+  All annotations are listed in the bottom pane; Copy (⇧⌘C) puts them on the clipboard as Markdown:
+
+      ## src/utils/mcp-oauth/permissions.test.ts:6 (+)
+      test
+
+  `(+)` = added line, `(-)` = removed line, no suffix = unchanged line. Annotations are kept per
+  repository in the app's preferences (never written into the repo).

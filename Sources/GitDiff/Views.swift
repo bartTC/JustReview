@@ -5,11 +5,16 @@ struct ContentView: View {
     @AppStorage("diffMode") private var mode: DiffMode = .unified
 
     var body: some View {
-        NavigationSplitView {
-            FileListView(model: model)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 280, max: 500)
-        } detail: {
-            DiffDetailView(model: model, mode: mode)
+        VSplitView {
+            NavigationSplitView {
+                FileListView(model: model)
+                    .navigationSplitViewColumnWidth(min: 200, ideal: 280, max: 500)
+            } detail: {
+                DiffDetailView(model: model, mode: mode)
+            }
+            .frame(minHeight: 250, idealHeight: 2000)
+            .layoutPriority(1)
+            AnnotationsPane(model: model)
         }
         .navigationTitle(model.repoName)
         .navigationSubtitle(model.branch)
@@ -184,24 +189,46 @@ struct DiffDetailView: View {
             let gutter = CGFloat(digits) * FontPrefs.digitWidth(nsFont) + 12
             let font = Font(nsFont as CTFont)
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if !diff.notes.isEmpty {
-                        Text(diff.notes.joined(separator: "\n"))
-                            .foregroundStyle(.secondary)
-                            .padding(8)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        if !diff.notes.isEmpty {
+                            Text(diff.notes.joined(separator: "\n"))
+                                .foregroundStyle(.secondary)
+                                .padding(8)
+                        }
+                        switch mode {
+                        case .unified:
+                            ForEach(diff.unified) {
+                                UnifiedRowView(model: model, path: change.path, row: $0, gutter: gutter)
+                            }
+                        case .split:
+                            ForEach(diff.split) {
+                                SplitRowView(model: model, path: change.path, row: $0, gutter: gutter)
+                            }
+                        }
                     }
-                    switch mode {
-                    case .unified:
-                        ForEach(diff.unified) { UnifiedRowView(row: $0, gutter: gutter) }
-                    case .split:
-                        ForEach(diff.split) { SplitRowView(row: $0, gutter: gutter) }
-                    }
+                    .font(font)
                 }
-                .font(font)
+                .id("\(change.id)|\(mode.rawValue)") // reset scroll position on file/mode change
+                .background(Color(nsColor: .textBackgroundColor))
+                .onAppear { scrollIfRequested(proxy, diff: diff, path: change.path) }
+                .onChange(of: model.scrollRequest) { scrollIfRequested(proxy, diff: diff, path: change.path) }
             }
-            .id("\(change.id)|\(mode.rawValue)") // reset scroll position on file/mode change
-            .background(Color(nsColor: .textBackgroundColor))
+        }
+    }
+
+    /// Jump to an annotated line when one is picked in the annotations pane.
+    private func scrollIfRequested(_ proxy: ScrollViewProxy, diff: RenderedDiff, path: String) {
+        guard let req = model.scrollRequest, req.path == path else { return }
+        let rowID: Int? = switch mode {
+        case .unified: diff.unified.first { $0.key == req.key }?.id
+        case .split: diff.split.first { $0.left?.key == req.key || $0.right?.key == req.key }?.id
+        }
+        model.scrollRequest = nil
+        guard let rowID else { return }
+        DispatchQueue.main.async {
+            withAnimation { proxy.scrollTo(rowID, anchor: .center) }
         }
     }
 }
@@ -232,30 +259,67 @@ private struct LineNumber: View {
     }
 }
 
+/// Double-click (or right-click → Annotate) opens the annotation popover for a line.
+private struct AnnotatableLine: ViewModifier {
+    @ObservedObject var model: RepoModel
+    let target: EditTarget
+    let text: AttributedString
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { model.editing = target }
+            .contextMenu {
+                Button(model.annotation(path: target.path, key: target.key) == nil
+                       ? "Add Annotation…" : "Edit Annotation…") { model.editing = target }
+                Button("Copy Line") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(String(text.characters), forType: .string)
+                }
+            }
+            .popover(isPresented: model.editingBinding(target), arrowEdge: .bottom) {
+                AnnotationEditor(model: model, target: target)
+            }
+    }
+}
+
 struct UnifiedRowView: View {
+    @ObservedObject var model: RepoModel
+    let path: String
     let row: UnifiedRow
     let gutter: CGFloat
 
     var body: some View {
         if let header = row.header {
             HunkHeaderView(text: header)
-        } else {
-            HStack(alignment: .top, spacing: 0) {
-                LineNumber(number: row.oldNo, width: gutter)
-                LineNumber(number: row.newNo, width: gutter)
-                Text(DiffStyle.marker(row.kind))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16)
-                Text(row.text)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        } else if let key = row.key {
+            let target = EditTarget(path: path, key: key, rowID: row.id, column: 0)
+            VStack(spacing: 0) {
+                HStack(alignment: .top, spacing: 0) {
+                    LineNumber(number: row.oldNo, width: gutter)
+                    LineNumber(number: row.newNo, width: gutter)
+                    Text(DiffStyle.marker(row.kind))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16)
+                    Text(row.text)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .background(DiffStyle.background(row.kind))
+                .modifier(AnnotatableLine(model: model, target: target, text: row.text))
+
+                if let note = model.annotation(path: path, key: key) {
+                    AnnotationNoteView(annotation: note, indent: gutter * 2 + 24) {
+                        model.editing = target
+                    }
+                }
             }
-            .background(DiffStyle.background(row.kind))
         }
     }
 }
 
 struct SplitRowView: View {
+    @ObservedObject var model: RepoModel
+    let path: String
     let row: SplitRow
     let gutter: CGFloat
 
@@ -263,39 +327,76 @@ struct SplitRowView: View {
         if let header = row.header {
             HunkHeaderView(text: header)
         } else {
-            HStack(spacing: 0) {
-                SideCellView(cell: row.left, gutter: gutter)
-                Rectangle()
-                    .fill(Color(nsColor: .separatorColor))
-                    .frame(width: 1)
-                SideCellView(cell: row.right, gutter: gutter)
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    SideCellView(model: model, path: path, rowID: row.id, column: 1, cell: row.left, gutter: gutter)
+                    Rectangle()
+                        .fill(Color(nsColor: .separatorColor))
+                        .frame(width: 1)
+                    SideCellView(model: model, path: path, rowID: row.id, column: 2, cell: row.right, gutter: gutter)
+                }
+                .fixedSize(horizontal: false, vertical: true) // both halves take the taller height
+
+                notes
             }
-            .fixedSize(horizontal: false, vertical: true) // both halves take the taller height
+        }
+    }
+
+    /// Notes sit under the half they belong to; an unchanged line's note spans both.
+    @ViewBuilder
+    private var notes: some View {
+        let left = row.left.flatMap { model.annotation(path: path, key: $0.key) }
+        let right = row.right.flatMap { model.annotation(path: path, key: $0.key) }
+        if let left, left == right {
+            note(left, column: 1)
+        } else if left != nil || right != nil {
+            HStack(alignment: .top, spacing: 0) {
+                Group {
+                    if let left { note(left, column: 1) } else { Color.clear.frame(height: 0) }
+                }
+                .frame(maxWidth: .infinity)
+                Group {
+                    if let right { note(right, column: 2) } else { Color.clear.frame(height: 0) }
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private func note(_ a: Annotation, column: Int) -> some View {
+        AnnotationNoteView(annotation: a, indent: gutter + 22) {
+            model.editing = EditTarget(path: path, key: a.key, rowID: row.id, column: column)
         }
     }
 }
 
 private struct SideCellView: View {
+    @ObservedObject var model: RepoModel
+    let path: String
+    let rowID: Int
+    let column: Int
     let cell: SideCell?
     let gutter: CGFloat
 
     var body: some View {
-        Group {
-            if let cell {
-                HStack(alignment: .top, spacing: 0) {
-                    LineNumber(number: cell.number, width: gutter)
-                    Text(DiffStyle.marker(cell.kind))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 14)
-                    Text(cell.text)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            } else {
-                Color.clear
+        if let cell {
+            HStack(alignment: .top, spacing: 0) {
+                LineNumber(number: cell.number, width: gutter)
+                Text(DiffStyle.marker(cell.kind))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 14)
+                Text(cell.text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(DiffStyle.background(cell.kind))
+            .modifier(AnnotatableLine(
+                model: model,
+                target: EditTarget(path: path, key: cell.key, rowID: rowID, column: column),
+                text: cell.text))
+        } else {
+            DiffStyle.fillerBG
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(cell.map { DiffStyle.background($0.kind) } ?? DiffStyle.fillerBG)
     }
 }
