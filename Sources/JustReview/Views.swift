@@ -8,6 +8,42 @@ struct ContentView: View {
     @AppStorage("diffMode") private var mode: DiffMode = .unified
     @AppStorage("wrapLines") private var wrapLines = true
 
+    /// The diff with its toolbar items. They're declared on the detail column itself so they
+    /// (and the spacer pushing the buttons right) land in the detail part of the toolbar.
+    private var diffView: some View {
+        DiffDetailView(model: model, mode: mode)
+            .toolbar {
+                if #available(macOS 26, *) {
+                    ToolbarItem(placement: .navigation) { RepoTitle(model: model) }
+                        .sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .navigation) { RepoTitle(model: model) }
+                }
+                ToolbarItemGroup {
+                    // Without a drawn title nothing fills the middle; keep the buttons on the right.
+                    Spacer()
+                    Picker("Layout", selection: $mode) {
+                        Label("Stacked", systemImage: "rectangle.split.1x2").tag(DiffMode.unified)
+                        Label("Side by Side", systemImage: "rectangle.split.2x1").tag(DiffMode.split)
+                    }
+                    .pickerStyle(.segmented)
+                    .help("Stacked (⌘1) / Side by side (⌘2)")
+
+                    Toggle(isOn: $wrapLines) {
+                        Label("Wrap Lines", systemImage: "arrow.turn.down.left")
+                    }
+                    .toggleStyle(.button)
+                    .help("Wrap long lines (⌥Z)")
+
+                    Button { Task { await model.refresh() } } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .help("Refresh (⇧⌘R)")
+                    .disabled(model.root == nil)
+                }
+            }
+    }
+
     var body: some View {
         // Annotations pane sits below the split view and takes real space
         // (a safe-area inset would let the split view's columns scroll underneath it).
@@ -20,43 +56,21 @@ struct ContentView: View {
                             .navigationSplitViewColumnWidth(min: 200, ideal: 280, max: 500)
                             .toolbar(removing: .sidebarToggle)
                     } detail: {
-                        DiffDetailView(model: model, mode: mode)
+                        diffView
                     }
                     AnnotationsPane(model: model)
                 }
             } else {
-                DiffDetailView(model: model, mode: mode)
+                diffView
             }
         }
         // The toolbar's tinted detail section doesn't line up with the split view's divider
         // on recent macOS; hiding the toolbar background removes the misaligned edge.
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-        // Each native tab is titled with its file; the repository and branch go underneath.
+        // The window title names the file (it labels the native tab) but isn't drawn in the
+        // toolbar; the toolbar shows the repository and its branch instead.
         .navigationTitle(model.selection.map { ($0 as NSString).lastPathComponent } ?? model.repoName)
-        .navigationSubtitle(model.selection == nil ? model.branch
-                            : [model.repoName, model.branch].filter { !$0.isEmpty }.joined(separator: " — "))
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Picker("Layout", selection: $mode) {
-                    Label("Stacked", systemImage: "rectangle.split.1x2").tag(DiffMode.unified)
-                    Label("Side by Side", systemImage: "rectangle.split.2x1").tag(DiffMode.split)
-                }
-                .pickerStyle(.segmented)
-                .help("Stacked (⌘1) / Side by side (⌘2)")
-
-                Toggle(isOn: $wrapLines) {
-                    Label("Wrap Lines", systemImage: "arrow.turn.down.left")
-                }
-                .toggleStyle(.button)
-                .help("Wrap long lines (⌥Z)")
-
-                Button { Task { await model.refresh() } } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-                .help("Refresh (⇧⌘R)")
-                .disabled(model.root == nil)
-            }
-        }
+        .toolbar(removing: .title)
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first else { return false }
             WindowRouter.shared.open(url, preferring: handle)
@@ -73,6 +87,31 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await model.refresh() }
         }
+    }
+}
+
+/// Toolbar title: repository folder name with the branch in a pill next to it.
+private struct RepoTitle: View {
+    @ObservedObject var model: RepoModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(model.repoName)
+                .font(.headline)
+            if !model.branch.isEmpty {
+                Text(model.branch)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(.quaternary))
+            }
+        }
+        .fixedSize()
+        .padding(.leading, 6)
+        .help(model.root?.path ?? "")
     }
 }
 
