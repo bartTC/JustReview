@@ -1,7 +1,15 @@
 #!/bin/bash
-# Builds build/JustReview.app (release, ad-hoc signed).
+# Builds build/JustReview.app (release build).
+#
+#   VERSION=1.2.0 BUILD=57   version and build number (default: 0.0.0, commit count)
+#   SIGN_IDENTITY="Developer ID Application: …"
+#                            sign for distribution (hardened runtime, secure timestamp);
+#                            without it the app is signed ad hoc, for local use
 set -euo pipefail
 cd "$(dirname "$0")"
+
+VERSION="${VERSION:-0.0.0}"
+BUILD="${BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 
 swift build -c release --product JustReview
 BIN="$(swift build -c release --show-bin-path)/JustReview"
@@ -22,12 +30,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
     <key>CFBundleName</key><string>JustReview</string>
     <key>CFBundleDisplayName</key><string>JustReview</string>
-    <key>CFBundleIdentifier</key><string>local.justreview</string>
+    <key>CFBundleIdentifier</key><string>house.elephant.justreview</string>
     <key>CFBundleExecutable</key><string>JustReview</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.0</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>$VERSION</string>
+    <key>CFBundleVersion</key><string>$BUILD</string>
     <key>LSMinimumSystemVersion</key><string>15.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
@@ -45,5 +53,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --sign - "$APP" >/dev/null
-echo "Built $APP"
+if [ -n "${SIGN_IDENTITY:-}" ]; then
+    codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
+    codesign --verify --strict --verbose=2 "$APP"
+else
+    codesign --force --sign - "$APP" >/dev/null
+fi
+echo "Built $APP ($VERSION, build $BUILD)"

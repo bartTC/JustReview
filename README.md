@@ -33,12 +33,15 @@ of your choice.
 
 ## Install
 
-Requires macOS 15 or later and the Xcode Command Line Tools.
+Requires macOS 15 or later on Apple Silicon.
+
+Download the latest `JustReview-x.y.z.zip` from
+[Releases](https://github.com/bartTC/JustReview/releases), unzip it and move `JustReview.app`
+to Applications. Or build it yourself with the Xcode Command Line Tools:
 
     ./build.sh                # builds build/JustReview.app
 
-Then move `JustReview.app` to Applications and choose **JustReview → Install Command Line
-Tool…** to get the `jrev` command:
+Choose **JustReview → Install Command Line Tool…** to get the `jrev` command:
 
     jrev                      # review the repository in the current directory
     jrev ~/code/project       # or any other one

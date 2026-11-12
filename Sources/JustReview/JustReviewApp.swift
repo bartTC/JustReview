@@ -2,7 +2,7 @@ import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
-        migrateDefaultsFromGitDiff()
+        migrateOldDefaults()
         AppAppearance.current.apply()
         // No window tabs: one window per repository, files open in their own windows.
         NSWindow.allowsAutomaticWindowTabbing = false
@@ -18,16 +18,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    /// The app used to be called GitDiff (bundle id local.gitdiff): carry over settings and annotations once.
-    private func migrateDefaultsFromGitDiff() {
+    /// Carries settings, annotations and window positions over once from earlier bundle ids:
+    /// local.justreview (development builds) and local.gitdiff (when the app was called GitDiff).
+    private func migrateOldDefaults() {
         let defaults = UserDefaults.standard
-        guard !defaults.bool(forKey: "migratedFromGitDiff") else { return }
-        if let old = defaults.persistentDomain(forName: "local.gitdiff") {
+        guard !defaults.bool(forKey: "migratedOldDefaults") else { return }
+        for domain in ["local.justreview", "local.gitdiff"] {
+            guard let old = defaults.persistentDomain(forName: domain) else { continue }
             for (key, value) in old where defaults.object(forKey: key) == nil {
                 defaults.set(value, forKey: key)
             }
         }
-        defaults.set(true, forKey: "migratedFromGitDiff")
+        defaults.set(true, forKey: "migratedOldDefaults")
     }
 }
 
