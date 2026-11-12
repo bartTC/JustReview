@@ -10,9 +10,11 @@ struct ContentView: View {
         // Annotations pane sits below the split view and takes real space
         // (a safe-area inset would let the split view's columns scroll underneath it).
         VStack(spacing: 0) {
-            NavigationSplitView {
+            // The file list is essential: always visible, no toggle, can't be collapsed.
+            NavigationSplitView(columnVisibility: .constant(.all)) {
                 FileListView(model: model, handle: handle)
                     .navigationSplitViewColumnWidth(min: 200, ideal: 280, max: 500)
+                    .toolbar(removing: .sidebarToggle)
             } detail: {
                 DiffDetailView(model: model, mode: mode)
             }

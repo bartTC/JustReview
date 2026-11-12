@@ -75,6 +75,8 @@ struct AppCommands: Commands {
             Button("Open Repository…") { WindowRouter.shared.chooseRepository(preferring: handle) }
                 .keyboardShortcut("o")
         }
+        // The file list can't be hidden: drop "Show/Hide Sidebar".
+        CommandGroup(replacing: .sidebar) {}
         // Read-only viewer: drop the save/revert/print items.
         CommandGroup(replacing: .saveItem) {}
         CommandGroup(replacing: .printItem) {}
