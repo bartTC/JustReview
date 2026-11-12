@@ -32,7 +32,7 @@ The list and the diff reload automatically when files in the repository change.
 - The left pane shows the changed files as a tree. **Show All Files** (toolbar or ⇧⌘A) adds the
   unchanged files too (greyed out); selecting one shows its full content.
 - ⌘1 stacked, ⌘2 side by side, ⇧⌘R refresh (rarely needed: the repo is watched)
-- ⌘, Settings: font family/size for the file list and the diff view, line height, tab width,
+- ⌘, Settings: font family/size for the file list and the diff view, line height (0.05 steps), tab width,
   syntax highlighting on/off, and a syntax theme for light mode and one for dark mode
 - Click a diff line (or right-click → Add Annotation…) to annotate it; ⌘↩ saves.
   All annotations are listed in the bottom pane (fold it away with its chevron or ⌥⌘A).

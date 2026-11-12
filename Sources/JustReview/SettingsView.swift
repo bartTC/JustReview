@@ -29,8 +29,8 @@ struct SettingsView: View {
                              systemLabel: "System Monospaced")
                 Toggle("Show monospaced fonts only", isOn: $monospacedOnly)
                 SizeStepper(size: $diffSize)
-                Stepper(value: $lineHeight, in: 1.0...2.0, step: 0.1) {
-                    Text("Line height: \(lineHeight, format: .number.precision(.fractionLength(1)))×")
+                Stepper(value: $lineHeight, in: 1.0...2.0, step: 0.05) {
+                    Text("Line height: \(lineHeight, format: .number.precision(.fractionLength(2)))×")
                 }
                 Toggle("Syntax highlighting", isOn: $syntaxHighlighting)
                 Picker("Tab width", selection: $tabWidth) {
