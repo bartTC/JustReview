@@ -10,10 +10,15 @@ final class RepoModel: ObservableObject {
     @Published private(set) var root: URL?
     @Published private(set) var branch = ""
     @Published private(set) var changes: [FileChange] = []
+    /// Unchanged files, populated only while "Show All Files" is on.
+    @Published private(set) var unchanged: [FileChange] = []
     @Published private(set) var rendered: RenderedDiff?
     @Published var error: String?
     @Published var editing: EditTarget?
     @Published var scrollRequest: ScrollRequest?
+    /// Briefly true after copying annotations (drives the "Copied" button state).
+    @Published var justCopied = false
+    var copiedResetTask: Task<Void, Never>?
     /// Review notes. Kept in the app's preferences per repository — never written into the repo.
     @Published var annotations: [Annotation] = [] {
         didSet { saveAnnotations() }
@@ -31,7 +36,7 @@ final class RepoModel: ObservableObject {
 
     var selectedChange: FileChange? {
         guard let selection else { return nil }
-        return changes.first { $0.id == selection }
+        return changes.first { $0.id == selection } ?? unchanged.first { $0.id == selection }
     }
 
     // MARK: Opening
@@ -75,14 +80,25 @@ final class RepoModel: ObservableObject {
     private func refreshOnce() async {
         guard let root else { return }
         do {
-            let (changes, branch) = try await Task.detached {
-                (try Git.changes(in: root), Git.branch(in: root))
+            let showAll = UserDefaults.standard.bool(forKey: "showAllFiles")
+            let (changes, unchanged, branch) = try await Task.detached {
+                let changes = try Git.changes(in: root)
+                var unchanged: [FileChange] = []
+                if showAll {
+                    let changed = Set(changes.map(\.path))
+                    unchanged = try Git.allFiles(in: root)
+                        .filter { !changed.contains($0) }
+                        .map { FileChange(status: " ", path: $0, oldPath: nil) }
+                }
+                return (changes, unchanged, Git.branch(in: root))
             }.value
             guard root == self.root else { return } // repo switched meanwhile
             if self.branch != branch { self.branch = branch }
             if self.changes != changes { self.changes = changes }
+            if self.unchanged != unchanged { self.unchanged = unchanged }
 
-            if let selection, changes.contains(where: { $0.id == selection }) {
+            if let selection, changes.contains(where: { $0.id == selection })
+                || unchanged.contains(where: { $0.id == selection }) {
                 loadDiff() // the file may have changed on disk
             } else {
                 selection = changes.first?.id
@@ -131,7 +147,8 @@ final class RepoModel: ObservableObject {
                 // Unchanged since last time: keep the current rows (cheap refresh-on-focus).
                 if previous?.changeID == change.id, previous?.rawText == raw,
                    previous?.tabWidth == tabWidth { return nil }
-                return DiffRenderer.render(raw, changeID: change.id, tabWidth: tabWidth)
+                return DiffRenderer.render(raw, changeID: change.id, tabWidth: tabWidth,
+                                           showHunkHeaders: !change.isUnchanged)
             }.value
             guard generation == diffGeneration, let result else { return }
             rendered = result

@@ -29,10 +29,13 @@ The list and the diff reload automatically when files in the repository change.
 
 ## Use
 
-- ⌘1 stacked, ⌘2 side by side, ⌘R refresh
-- ⌘, Settings: font family/size for the file list and the diff view, tab width
-- Double-click a diff line (or right-click → Add Annotation…) to annotate it; ⌘↩ saves.
-  All annotations are listed in the bottom pane; Copy (⇧⌘C) puts them on the clipboard as Markdown:
+- The left pane shows the changed files as a tree. **Show All Files** (toolbar or ⇧⌘A) adds the
+  unchanged files too (greyed out); selecting one shows its full content.
+- ⌘1 stacked, ⌘2 side by side, ⇧⌘R refresh (rarely needed: the repo is watched)
+- ⌘, Settings: font family/size for the file list and the diff view, line height, tab width
+- Click a diff line (or right-click → Add Annotation…) to annotate it; ⌘↩ saves.
+  All annotations are listed in the bottom pane (fold it away with its chevron or ⌥⌘A).
+  ⌘C copies them all to the clipboard as Markdown; ⌘R clears them (after confirming):
 
       ## src/utils/mcp-oauth/permissions.test.ts:6 (+)
       test

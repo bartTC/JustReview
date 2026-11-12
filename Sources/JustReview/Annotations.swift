@@ -69,7 +69,11 @@ extension RepoModel {
         let lineMaps = await Task.detached { () -> [String: [LineKey: String]] in
             var maps: [String: [LineKey: String]] = [:]
             for path in paths {
-                guard let change = byPath[path] else { maps[path] = [:]; continue } // file no longer changed
+                // Not changed any more: compare against the file as it is (notes on unchanged
+                // lines survive; notes on added/removed lines no longer match and are dropped).
+                let onDisk = FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path)
+                guard let change = byPath[path] ?? (onDisk ? FileChange(status: " ", path: path, oldPath: nil) : nil)
+                else { maps[path] = [:]; continue }
                 guard let raw = try? Git.diff(for: change, in: root) else { continue } // git hiccup: keep notes
                 maps[path] = DiffParser.lineTexts(DiffParser.parse(raw))
             }
@@ -115,6 +119,18 @@ extension RepoModel {
         }
     }
 
+    /// Asks before deleting every annotation of this repository (Clear All button, ⌘R).
+    func confirmClearAnnotations() {
+        guard !annotations.isEmpty else { return }
+        let alert = NSAlert()
+        alert.messageText = "Delete all \(annotations.count) annotations?"
+        alert.informativeText = "This can’t be undone."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Delete All").hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn { annotations = [] }
+    }
+
     func removeAnnotation(_ annotation: Annotation) {
         annotations.removeAll { $0.id == annotation.id }
     }
@@ -123,10 +139,17 @@ extension RepoModel {
         annotations.map(\.markdown).joined(separator: "\n\n") + "\n"
     }
 
+    /// Copies all annotations (Copy button or ⌘C) and flashes "Copied" on the button.
     func copyAnnotations() {
         guard !annotations.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(annotationsMarkdown, forType: .string)
+        justCopied = true
+        copiedResetTask?.cancel()
+        copiedResetTask = Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            if !Task.isCancelled { justCopied = false }
+        }
     }
 
     func reveal(_ annotation: Annotation) {
@@ -227,7 +250,7 @@ struct AnnotationNoteView: View {
         .padding(.trailing, 8)
         .padding(.vertical, 3)
         .contentShape(Rectangle())
-        .onTapGesture(count: 2, perform: onEdit)
+        .onTapGesture(perform: onEdit)
     }
 }
 
@@ -284,15 +307,25 @@ private struct AnnotationPaneRow: View {
 
 struct AnnotationsPane: View {
     @ObservedObject var model: RepoModel
-    @StateObject private var copied = Box(false)
-    @StateObject private var confirmClear = Box(false)
     @StateObject private var dragStart = Box<Double?>(nil)
     @AppStorage("annotationsPaneHeight") private var height = 160.0
+    @AppStorage("annotationsCollapsed") private var collapsed = false
+
+    private static let headerHeight = 32.0
 
     var body: some View {
         VStack(spacing: 0) {
-            resizeHandle
+            if collapsed { Divider() } else { resizeHandle }
             HStack(spacing: 8) {
+                Button {
+                    collapsed.toggle()
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .rotationEffect(.degrees(collapsed ? -90 : 0))
+                        .frame(width: 14, height: 14)
+                }
+                .buttonStyle(.borderless)
+                .help(collapsed ? "Show annotations (⌥⌘A)" : "Fold away annotations (⌥⌘A)")
                 Text("Annotations").font(.headline)
                 Text("\(model.annotations.count)")
                     .font(.caption.monospacedDigit())
@@ -301,32 +334,39 @@ struct AnnotationsPane: View {
                 Spacer()
                 Button {
                     model.copyAnnotations()
-                    copied.value = true
-                    Task {
-                        try? await Task.sleep(for: .seconds(1.5))
-                        copied.value = false
-                    }
                 } label: {
-                    Label(copied.value ? "Copied" : "Copy", systemImage: copied.value ? "checkmark" : "doc.on.doc")
+                    // Fixed icon slot and width so swapping "Copy" ↔ "Copied" doesn't shift anything.
+                    HStack(spacing: 4) {
+                        Image(systemName: model.justCopied ? "checkmark" : "doc.on.doc")
+                            .frame(width: 14, height: 14)
+                        Text(model.justCopied ? "Copied" : "Copy")
+                    }
+                    .frame(width: 64)
                 }
-                .help("Copy all annotations as Markdown (⇧⌘C)")
+                .help("Copy all annotations as Markdown (⌘C)")
                 .disabled(model.annotations.isEmpty)
 
-                Button("Clear All", role: .destructive) { confirmClear.value = true }
+                Button("Clear All…", role: .destructive) { model.confirmClearAnnotations() }
+                    .help("Delete all annotations (⌘R)")
                     .disabled(model.annotations.isEmpty)
-                    .confirmationDialog("Delete all \(model.annotations.count) annotations?",
-                                        isPresented: $confirmClear.value) {
-                        Button("Delete All", role: .destructive) { model.annotations = [] }
-                    }
             }
             .controlSize(.small)
             .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .frame(height: Self.headerHeight)
 
-            Divider()
+            if !collapsed {
+                Divider()
+                content
+            }
+        }
+        .frame(height: collapsed ? Self.headerHeight + 1 : height)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
 
+    @ViewBuilder
+    private var content: some View {
             if model.annotations.isEmpty {
-                Text("Double-click a line in the diff to annotate it.")
+                Text("Click a line in the diff to annotate it.")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -339,9 +379,6 @@ struct AnnotationsPane: View {
                 }
                 .listStyle(.plain)
             }
-        }
-        .frame(height: height)
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     /// Top border doubling as a drag handle to resize the pane.

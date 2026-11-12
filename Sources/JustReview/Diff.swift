@@ -175,7 +175,7 @@ enum DiffStyle {
 }
 
 enum DiffRenderer {
-    static func render(_ raw: String, changeID: String, tabWidth: Int) -> RenderedDiff {
+    static func render(_ raw: String, changeID: String, tabWidth: Int, showHunkHeaders: Bool = true) -> RenderedDiff {
         var diff = DiffParser.parse(raw)
         let lineTexts = DiffParser.lineTexts(diff)
         for h in diff.hunks.indices {
@@ -188,9 +188,11 @@ enum DiffRenderer {
         var maxNo = 0, added = 0, removed = 0
 
         for hunk in diff.hunks {
+            if showHunkHeaders {
             unified.append(UnifiedRow(id: unified.count, header: hunk.header, key: nil, kind: .context,
                                       oldNo: nil, newNo: nil, text: AttributedString()))
             split.append(SplitRow(id: split.count, header: hunk.header, left: nil, right: nil))
+            }
 
             var rem: [DiffLine] = []
             var add: [DiffLine] = []

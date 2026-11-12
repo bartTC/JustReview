@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var model: RepoModel
     let handle: WindowHandle
+    @AppStorage("showAllFiles") private var showAll = false
     @AppStorage("diffMode") private var mode: DiffMode = .unified
 
     var body: some View {
@@ -31,10 +32,16 @@ struct ContentView: View {
                 .pickerStyle(.segmented)
                 .help("Stacked (⌘1) / Side by side (⌘2)")
 
+                Toggle(isOn: $showAll) {
+                    Label("Show All Files", systemImage: "list.bullet.indent")
+                }
+                .toggleStyle(.button)
+                .help("Show all files, not just changed ones (⇧⌘A)")
+
                 Button { Task { await model.refresh() } } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
-                .help("Refresh (⌘R)")
+                .help("Refresh (⇧⌘R)")
                 .disabled(model.root == nil)
 
                 Button { WindowRouter.shared.chooseRepository(preferring: handle) } label: {
@@ -69,12 +76,17 @@ struct FileListView: View {
     let handle: WindowHandle
     @AppStorage(FontPrefs.listFamily) private var family = ""
     @AppStorage(FontPrefs.listSize) private var size = FontPrefs.defaultListSize
+    @AppStorage("showAllFiles") private var showAll = false
+    /// Folders the user expanded/collapsed by hand; others use the default (see `isExpanded`).
+    @StateObject private var expansion = Box<[String: Bool]>([:])
 
     var body: some View {
         let font = Font(FontPrefs.listFont(family: family, size: size) as CTFont)
-        List(model.changes, selection: $model.selection) { change in
-            FileRow(change: change, font: font, size: size).tag(change.id)
+        let tree = FileTree.build(model.changes + (showAll ? model.unchanged : []))
+        List(selection: $model.selection) {
+            FileTreeRows(nodes: tree, font: font, size: size, isExpanded: isExpanded)
         }
+        .onChange(of: showAll) { Task { await model.refresh() } }
         .overlay {
             if model.root == nil {
                 ContentUnavailableView {
@@ -89,9 +101,107 @@ struct FileListView: View {
                         }
                     }
                 }
-            } else if model.changes.isEmpty {
+            } else if model.changes.isEmpty && !showAll {
                 ContentUnavailableView("No Changes", systemImage: "checkmark.circle",
                                        description: Text("Nothing differs from HEAD."))
+            }
+        }
+    }
+
+    /// Folders start expanded when they contain changes (always, unless showing all files).
+    private func isExpanded(_ node: FileTreeNode) -> Binding<Bool> {
+        Binding(
+            get: { expansion.value[node.path] ?? (node.hasChanges || !showAll) },
+            set: { expansion.value[node.path] = $0 }
+        )
+    }
+}
+
+// MARK: - File tree
+
+struct FileTreeNode: Identifiable {
+    /// Not a String, so folder rows don't take part in the List's (String) selection.
+    struct ID: Hashable { let path: String }
+
+    let path: String
+    let name: String
+    let change: FileChange?          // nil for folders
+    var children: [FileTreeNode] = []
+    var hasChanges = false
+
+    var id: ID { ID(path: path) }
+}
+
+enum FileTree {
+    private final class Folder {
+        var folders: [String: Folder] = [:]
+        var files: [FileChange] = []
+    }
+
+    static func build(_ files: [FileChange]) -> [FileTreeNode] {
+        let root = Folder()
+        for file in files {
+            var folder = root
+            for part in file.path.split(separator: "/").dropLast().map(String.init) {
+                if folder.folders[part] == nil { folder.folders[part] = Folder() }
+                folder = folder.folders[part]!
+            }
+            folder.files.append(file)
+        }
+        return nodes(root, prefix: "")
+    }
+
+    private static func nodes(_ folder: Folder, prefix: String) -> [FileTreeNode] {
+        var result: [FileTreeNode] = []
+        for name in folder.folders.keys.sorted(by: { $0.localizedStandardCompare($1) == .orderedAscending }) {
+            var sub = folder.folders[name]!
+            var label = name
+            // Compact chains of single-child folders: "src/utils/mcp-oauth".
+            while sub.files.isEmpty, sub.folders.count == 1, let (next, nextFolder) = sub.folders.first {
+                label += "/" + next
+                sub = nextFolder
+            }
+            let path = prefix + label
+            let children = nodes(sub, prefix: path + "/")
+            result.append(FileTreeNode(path: path, name: label, change: nil, children: children,
+                                       hasChanges: children.contains { $0.hasChanges }))
+        }
+        for file in folder.files.sorted(by: { $0.fileName.localizedStandardCompare($1.fileName) == .orderedAscending }) {
+            result.append(FileTreeNode(path: file.path, name: file.fileName, change: file,
+                                       hasChanges: !file.isUnchanged))
+        }
+        return result
+    }
+}
+
+private struct FileTreeRows: View {
+    let nodes: [FileTreeNode]
+    let font: Font
+    let size: Double
+    let isExpanded: (FileTreeNode) -> Binding<Bool>
+
+    var body: some View {
+        ForEach(nodes) { node in
+            if let change = node.change {
+                FileRow(change: change, font: font, size: size).tag(change.id)
+            } else {
+                DisclosureGroup(isExpanded: isExpanded(node)) {
+                    FileTreeRows(nodes: node.children, font: font, size: size, isExpanded: isExpanded)
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "folder")
+                            .font(.system(size: size * 0.9))
+                            .foregroundStyle(.secondary)
+                            .frame(width: (size * 1.15).rounded())
+                        Text(node.name)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .foregroundStyle(node.hasChanges ? .primary : .secondary)
+                    }
+                    .font(font)
+                    .contentShape(Rectangle())
+                    .onTapGesture { isExpanded(node).wrappedValue.toggle() }
+                }
             }
         }
     }
@@ -104,14 +214,13 @@ struct FileRow: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            StatusBadge(label: change.statusLabel, size: size)
             Text(change.fileName)
                 .lineLimit(1)
-            if !change.directory.isEmpty {
-                Text(change.directory)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.head)
+                .truncationMode(.middle)
+                .foregroundStyle(change.isUnchanged ? .secondary : .primary)
+            Spacer(minLength: 4)
+            if !change.isUnchanged {
+                StatusBadge(label: change.statusLabel, size: size)
             }
         }
         .font(font)
@@ -125,9 +234,9 @@ private struct StatusBadge: View {
     let size: Double
 
     var body: some View {
-        let box = (size * 1.15).rounded()
+        let box = (size * 1.15).rounded() - 2
         Text(label)
-            .font(.system(size: size * 0.68, weight: .semibold, design: .rounded))
+            .font(.system(size: size * 0.68 - 1, weight: .semibold, design: .rounded))
             .foregroundStyle(.secondary)
             .frame(width: box, height: box)
             .overlay(
@@ -145,6 +254,7 @@ struct DiffDetailView: View {
     @AppStorage(FontPrefs.diffFamily) private var family = ""
     @AppStorage(FontPrefs.diffSize) private var size = FontPrefs.defaultDiffSize
     @AppStorage(FontPrefs.tabWidth) private var tabWidth = FontPrefs.defaultTabWidth
+    @AppStorage(FontPrefs.lineHeight) private var lineHeight = FontPrefs.defaultLineHeight
 
     var body: some View {
         detail.onChange(of: tabWidth) { model.reloadDiff() }
@@ -226,6 +336,9 @@ struct DiffDetailView: View {
                         }
                     }
                     .font(font)
+                    // Line height: extra space split above/below each row, and between wrapped lines.
+                    .lineSpacing((lineHeight - 1) * size)
+                    .environment(\.diffLinePadding, (lineHeight - 1) * size / 2)
                 }
                 .id("\(change.id)|\(mode.rawValue)") // reset scroll position on file/mode change
                 .background(Color(nsColor: .textBackgroundColor))
@@ -282,6 +395,18 @@ private struct HunkHeaderView: View {
     }
 }
 
+private struct DiffLinePaddingKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
+extension EnvironmentValues {
+    /// Vertical padding above and below each diff line (from the line height setting).
+    var diffLinePadding: CGFloat {
+        get { self[DiffLinePaddingKey.self] }
+        set { self[DiffLinePaddingKey.self] = newValue }
+    }
+}
+
 private struct LineNumber: View {
     let number: Int?
     let width: CGFloat
@@ -293,7 +418,7 @@ private struct LineNumber: View {
     }
 }
 
-/// Double-click (or right-click → Annotate) opens the annotation popover for a line.
+/// Click (or right-click → Annotate) opens the annotation popover for a line.
 private struct AnnotatableLine: ViewModifier {
     @ObservedObject var model: RepoModel
     let target: EditTarget
@@ -305,7 +430,7 @@ private struct AnnotatableLine: ViewModifier {
             .overlay(Color.primary.opacity(hovered.value ? 0.06 : 0).allowsHitTesting(false))
             .onHover { hovered.value = $0 }
             .contentShape(Rectangle())
-            .onTapGesture(count: 2) { model.editing = target }
+            .onTapGesture { model.editing = target }
             .contextMenu {
                 Button(model.annotation(path: target.path, key: target.key) == nil
                        ? "Add Annotation…" : "Edit Annotation…") { model.editing = target }
@@ -322,6 +447,7 @@ private struct AnnotatableLine: ViewModifier {
 
 struct UnifiedRowView: View {
     @ObservedObject var model: RepoModel
+    @Environment(\.diffLinePadding) private var linePadding
     let path: String
     let row: UnifiedRow
     let gutter: CGFloat
@@ -341,6 +467,7 @@ struct UnifiedRowView: View {
                     Text(row.text)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .padding(.vertical, linePadding)
                 .background(DiffStyle.background(row.kind))
                 .modifier(AnnotatableLine(model: model, target: target, text: row.text))
 
@@ -409,6 +536,7 @@ struct SplitRowView: View {
 
 private struct SideCellView: View {
     @ObservedObject var model: RepoModel
+    @Environment(\.diffLinePadding) private var linePadding
     let path: String
     let rowID: Int
     let column: Int
@@ -425,6 +553,7 @@ private struct SideCellView: View {
                 Text(cell.text)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .padding(.vertical, linePadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(DiffStyle.background(cell.kind))
             .modifier(AnnotatableLine(

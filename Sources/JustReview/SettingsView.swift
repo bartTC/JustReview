@@ -7,6 +7,7 @@ struct SettingsView: View {
     @AppStorage(FontPrefs.diffSize) private var diffSize = FontPrefs.defaultDiffSize
     @AppStorage("diffMonospacedOnly") private var monospacedOnly = true
     @AppStorage(FontPrefs.tabWidth) private var tabWidth = FontPrefs.defaultTabWidth
+    @AppStorage(FontPrefs.lineHeight) private var lineHeight = FontPrefs.defaultLineHeight
 
     var body: some View {
         Form {
@@ -24,6 +25,9 @@ struct SettingsView: View {
                              systemLabel: "System Monospaced")
                 Toggle("Show monospaced fonts only", isOn: $monospacedOnly)
                 SizeStepper(size: $diffSize)
+                Stepper(value: $lineHeight, in: 1.0...2.0, step: 0.1) {
+                    Text("Line height: \(lineHeight, format: .number.precision(.fractionLength(1)))×")
+                }
                 Picker("Tab width", selection: $tabWidth) {
                     ForEach([2, 3, 4, 8], id: \.self) { Text("\($0) spaces").tag($0) }
                 }
@@ -41,6 +45,7 @@ struct SettingsView: View {
                         diffFamily = ""
                         diffSize = FontPrefs.defaultDiffSize
                         tabWidth = FontPrefs.defaultTabWidth
+                        lineHeight = FontPrefs.defaultLineHeight
                     }
                 }
             }

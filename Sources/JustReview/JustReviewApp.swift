@@ -55,9 +55,17 @@ struct JustReviewApp: App {
 
 /// Menu commands act on the focused window's repository.
 struct AppCommands: Commands {
+    private var isEditingText: Bool { NSApp.keyWindow?.firstResponder is NSText }
+
+    private func send(_ action: Selector) {
+        NSApp.sendAction(action, to: nil, from: nil)
+    }
+
     @FocusedObject private var model: RepoModel?
     @FocusedObject private var handle: WindowHandle?
     @AppStorage("diffMode") private var mode: DiffMode = .unified
+    @AppStorage("showAllFiles") private var showAll = false
+    @AppStorage("annotationsCollapsed") private var annotationsCollapsed = false
 
     var body: some Commands {
         CommandGroup(after: .appSettings) {
@@ -76,15 +84,33 @@ struct AppCommands: Commands {
             Button("Side by Side") { mode = .split }
                 .keyboardShortcut("2")
             Divider()
+            Toggle("Show All Files", isOn: $showAll)
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+            Toggle("Show Annotations", isOn: Binding(get: { !annotationsCollapsed },
+                                                     set: { annotationsCollapsed = !$0 }))
+                .keyboardShortcut("a", modifiers: [.command, .option])
+            Divider()
             Button("Refresh") { Task { await model?.refresh() } }
-                .keyboardShortcut("r")
+                .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(model?.root == nil)
             Divider()
         }
-        CommandGroup(after: .pasteboard) {
+        // ⌘C copies all annotations — except while editing text (e.g. an annotation), where
+        // Cut/Copy/Paste/Select All behave as usual.
+        CommandGroup(replacing: .pasteboard) {
+            Button("Cut") { send(#selector(NSText.cut(_:))) }
+                .keyboardShortcut("x")
+            Button("Copy") {
+                if isEditingText { send(#selector(NSText.copy(_:))) } else { model?.copyAnnotations() }
+            }
+            .keyboardShortcut("c")
+            Button("Paste") { send(#selector(NSText.paste(_:))) }
+                .keyboardShortcut("v")
+            Button("Select All") { send(#selector(NSText.selectAll(_:))) }
+                .keyboardShortcut("a")
             Divider()
-            Button("Copy Annotations") { model?.copyAnnotations() }
-                .keyboardShortcut("c", modifiers: [.command, .shift])
+            Button("Clear Annotations…") { model?.confirmClearAnnotations() }
+                .keyboardShortcut("r")
                 .disabled(model?.annotations.isEmpty ?? true)
         }
     }

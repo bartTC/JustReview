@@ -8,6 +8,9 @@ enum FontPrefs {
     static let diffFamily = "diffFontFamily"
     static let diffSize = "diffFontSize"
 
+    static let lineHeight = "diffLineHeight"
+    static let defaultLineHeight = 1.0
+
     static let tabWidth = "tabWidth"
     static let defaultTabWidth = 4
 
