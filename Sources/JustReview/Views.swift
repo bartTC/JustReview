@@ -3,7 +3,6 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var model: RepoModel
     let handle: WindowHandle
-    @AppStorage("showAllFiles") private var showAll = false
     @AppStorage("diffMode") private var mode: DiffMode = .unified
 
     var body: some View {
@@ -33,12 +32,6 @@ struct ContentView: View {
                 }
                 .pickerStyle(.segmented)
                 .help("Stacked (⌘1) / Side by side (⌘2)")
-
-                Toggle(isOn: $showAll) {
-                    Label("Show All Files", systemImage: "list.bullet.indent")
-                }
-                .toggleStyle(.button)
-                .help("Show all files, not just changed ones (⇧⌘A)")
 
                 Button { Task { await model.refresh() } } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
@@ -89,6 +82,17 @@ struct FileListView: View {
             FileTreeRows(nodes: tree, font: font, size: size, isExpanded: isExpanded)
         }
         .onChange(of: showAll) { Task { await model.refresh() } }
+        // File-list controls live in the sidebar's part of the toolbar (right-aligned).
+        .toolbar {
+            ToolbarItemGroup {
+                Spacer()
+                Toggle(isOn: $showAll) {
+                    Label("Show All Files", systemImage: "list.bullet.indent")
+                }
+                .toggleStyle(.button)
+                .help("Show all files, not just changed ones (⇧⌘A)")
+            }
+        }
         .overlay {
             if model.root == nil {
                 ContentUnavailableView {
