@@ -14,6 +14,46 @@ struct ChangeJump: Equatable {
     let nonce = UUID()
 }
 
+/// What the sidebar lists: changed files, all files, or the commit history.
+enum SidebarTab: String, CaseIterable {
+    case changes, files, history
+
+    var title: String {
+        switch self {
+        case .changes: "Changes"
+        case .files: "Files"
+        case .history: "History"
+        }
+    }
+
+    /// The tab new windows start with: the last one picked (earlier versions had a
+    /// "Show All Files" toggle instead of the Files tab).
+    static var initial: SidebarTab {
+        let defaults = UserDefaults.standard
+        if let raw = defaults.string(forKey: "sidebarTab"), let tab = SidebarTab(rawValue: raw) { return tab }
+        return defaults.bool(forKey: "showAllFiles") ? .files : .changes
+    }
+}
+
+/// One file of a commit, rendered for display.
+struct CommitFile: Identifiable {
+    let change: FileChange
+    let diff: RenderedDiff
+    var id: String { change.id }
+}
+
+/// A commit shown in the diff area: its message and every file it changed.
+struct RenderedCommit {
+    let hash: String
+    let parents: [String]
+    let author: String
+    let email: String
+    let date: Date
+    let subject: String
+    let body: String
+    let files: [CommitFile]
+}
+
 extension Array {
     subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
 }
@@ -61,6 +101,46 @@ final class RepoModel: ObservableObject {
 
     private var didInitialSelection = false
 
+    // MARK: Sidebar tabs and history
+
+    /// Changes, Files (every file, unchanged ones too) or History.
+    @Published var sidebarTab = SidebarTab.initial {
+        didSet {
+            guard oldValue != sidebarTab else { return }
+            UserDefaults.standard.set(sidebarTab.rawValue, forKey: "sidebarTab")
+            mark = nil
+            // Unchanged files are only listed (and kept up to date) on the Files tab.
+            if oldValue == .files || sidebarTab == .files { Task { await refresh() } }
+        }
+    }
+    /// The newest commits, loaded once the History tab is first shown.
+    @Published private(set) var commits: [Commit] = []
+    @Published private(set) var historyLoaded = false
+    private var historyLimit = 500
+    var historyHasMore: Bool { commits.count >= historyLimit }
+    /// The commit shown in the diff area on the History tab.
+    @Published var selectedCommit: String? {
+        didSet { if oldValue != selectedCommit { loadCommit() } }
+    }
+    @Published private(set) var renderedCommit: RenderedCommit?
+    @Published private(set) var commitError: String?
+    private var commitGeneration = 0
+
+    func loadHistory() async {
+        guard let root else { return }
+        let limit = historyLimit
+        let commits = (try? await Task.detached { try Git.log(in: root, limit: limit) }.value) ?? []
+        guard root == self.root else { return }
+        if self.commits != commits { self.commits = commits }
+        historyLoaded = true
+        if selectedCommit == nil { selectedCommit = commits.first?.id }
+    }
+
+    func loadMoreHistory() async {
+        historyLimit += 500
+        await loadHistory()
+    }
+
     private var diffGeneration = 0
     private var isRefreshing = false
     private var refreshPending = false
@@ -107,6 +187,10 @@ final class RepoModel: ObservableObject {
             rendered = nil
             didInitialSelection = false
             selection = select
+            commits = []
+            historyLoaded = false
+            historyLimit = 500
+            selectedCommit = nil
             let store = AnnotationStore.shared(for: top)
             annotationStore = store
             annotationSubscription = store.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
@@ -138,7 +222,7 @@ final class RepoModel: ObservableObject {
     private func refreshOnce() async {
         guard let root else { return }
         do {
-            let showAll = UserDefaults.standard.bool(forKey: "showAllFiles")
+            let showAll = sidebarTab == .files
             let (changes, unchanged, branch) = try await Task.detached {
                 let changes = try Git.changes(in: root)
                 var unchanged: [FileChange] = []
@@ -167,19 +251,39 @@ final class RepoModel: ObservableObject {
                 if selection == nil { selection = changes.first?.id }
             }
             loadDiff() // the shown file may have changed on disk
+            if historyLoaded { await loadHistory() } // new commits, checkouts
             await validateAnnotations(changes: changes, root: root)
         } catch {
             // Transient failures (e.g. mid-rebase) are ignored; the next file event retries.
         }
     }
 
-    func reloadDiff() { loadDiff() }
+    /// Renders again after a display setting changed (theme, tab width, highlighting).
+    func reloadDiff() {
+        loadDiff()
+        if selectedCommit != nil { loadCommit() }
+    }
 
     /// Highlights both whole file versions (so multi-line strings/comments are right even when a
     /// hunk starts inside one); diff lines then pick their colors by line number.
     nonisolated private static func syntax(for change: FileChange, in root: URL,
                                            styledScopes: Set<String>) -> DiffRenderer.Syntax {
-        guard let language = SyntaxLanguage.detect(path: change.path) else { return .none }
+        syntax(path: change.path, styledScopes: styledScopes,
+               old: {
+                   guard !change.isUntracked, !change.isUnchanged, change.status != "A" else { return nil }
+                   return Git.show(change.oldPath ?? change.path, in: root)
+               },
+               new: {
+                   guard change.status != "D" else { return nil }
+                   return FileManager.default.contents(atPath: root.appendingPathComponent(change.path).path)
+                       .map { String(decoding: $0, as: UTF8.self) }
+               })
+    }
+
+    /// Syntax tokens of a file's old and new version (each nil when that version doesn't exist).
+    nonisolated private static func syntax(path: String, styledScopes: Set<String>,
+                                           old: () -> String?, new: () -> String?) -> DiffRenderer.Syntax {
+        guard let language = SyntaxLanguage.detect(path: path) else { return .none }
         let isStyled = { (scope: String) -> Bool in
             var key = Substring(scope)
             while true {
@@ -189,13 +293,10 @@ final class RepoModel: ObservableObject {
             }
         }
         var result = DiffRenderer.Syntax()
-        if change.status != "D",
-           let data = FileManager.default.contents(atPath: root.appendingPathComponent(change.path).path) {
-            result.new = syntaxHighlighter.lineTokens(for: String(decoding: data, as: UTF8.self),
-                                                      language: language, isStyled: isStyled)
+        if let new = new() {
+            result.new = syntaxHighlighter.lineTokens(for: new, language: language, isStyled: isStyled)
         }
-        if !change.isUntracked, !change.isUnchanged, change.status != "A",
-           let old = Git.show(change.oldPath ?? change.path, in: root) {
+        if let old = old() {
             result.old = syntaxHighlighter.lineTokens(for: old, language: language, isStyled: isStyled)
         }
         return result
@@ -232,6 +333,59 @@ final class RepoModel: ObservableObject {
             }.value
             guard generation == diffGeneration, let result else { return }
             rendered = result
+        }
+    }
+}
+
+extension RepoModel {
+    /// Commits with more files than this are shown without syntax highlighting (each file
+    /// needs both versions read from git).
+    nonisolated private static let highlightFileLimit = 100
+
+    fileprivate func loadCommit() {
+        commitGeneration += 1
+        let generation = commitGeneration
+        commitError = nil
+        guard let root, let hash = selectedCommit else {
+            renderedCommit = nil
+            return
+        }
+        let tabWidth = FontPrefs.currentTabWidth
+        let syntaxEnabled = UserDefaults.standard.object(forKey: "syntaxHighlighting") as? Bool ?? true
+        let isDark = ThemePrefs.systemIsDark
+        let theme = ThemeStore.shared.theme(named: ThemePrefs.name(dark: isDark))
+        let styledScopes = ThemeStore.shared.theme(named: ThemePrefs.name(dark: false)).syntaxScopes
+            .union(ThemeStore.shared.theme(named: ThemePrefs.name(dark: true)).syntaxScopes)
+        Task {
+            let result = await Task.detached { () -> Result<RenderedCommit, Error> in
+                Result {
+                    let details = try Git.commitDetails(hash, in: root)
+                    let parent = details.parents.first
+                    let highlight = syntaxEnabled && details.files.count <= Self.highlightFileLimit
+                    let files = details.files.map { file -> CommitFile in
+                        let change = file.change
+                        let syntax = !highlight ? .none : Self.syntax(
+                            path: change.path, styledScopes: styledScopes,
+                            old: {
+                                guard change.status != "A", let parent else { return nil }
+                                return Git.show(change.oldPath ?? change.path, at: parent, in: root)
+                            },
+                            new: { change.status == "D" ? nil : Git.show(change.path, at: hash, in: root) })
+                        let diff = DiffRenderer.render(file.patch, changeID: change.id, tabWidth: tabWidth,
+                                                       syntax: syntax, syntaxEnabled: highlight,
+                                                       styler: ThemeStyler(theme: theme), dark: isDark)
+                        return CommitFile(change: change, diff: diff)
+                    }
+                    return RenderedCommit(hash: details.hash, parents: details.parents, author: details.author,
+                                          email: details.email, date: details.date, subject: details.subject,
+                                          body: details.body, files: files)
+                }
+            }.value
+            guard generation == commitGeneration else { return }
+            switch result {
+            case .success(let commit): renderedCommit = commit
+            case .failure(let error): commitError = error.localizedDescription
+            }
         }
     }
 }

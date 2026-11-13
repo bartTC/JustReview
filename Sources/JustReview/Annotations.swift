@@ -352,6 +352,7 @@ extension RepoModel {
     }
 
     func reveal(_ annotation: Annotation) {
+        if sidebarTab == .history { sidebarTab = .changes }
         selection = annotation.path
         scrollRequest = ScrollRequest(path: annotation.path, key: annotation.key)
     }

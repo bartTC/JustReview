@@ -6,6 +6,16 @@ All notable changes to JustReview. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- History tab: lists the commits; picking one shows its message and the changes of every file
+  it touched, one after another (read-only, no annotations). Click a file's header to fold it.
+
+### Changed
+
+- The sidebar has three tabs: Changes, Files and History (⌃⌘1/2/3). The Files tab replaces the
+  Show All Files toggle (⇧⌘A).
+
 ### Fixed
 
 - Switching between changed and all files could leave an old row drawn over another one in

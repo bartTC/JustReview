@@ -11,37 +11,43 @@ struct ContentView: View {
     /// The diff with its toolbar items. They're declared on the detail column itself so they
     /// (and the spacer pushing the buttons right) land in the detail part of the toolbar.
     private var diffView: some View {
-        DiffDetailView(model: model, mode: mode, showsFileList: showsChrome)
-            .toolbar {
-                if #available(macOS 26, *) {
-                    ToolbarItem(placement: .navigation) { RepoTitle(model: model) }
-                        .sharedBackgroundVisibility(.hidden)
-                } else {
-                    ToolbarItem(placement: .navigation) { RepoTitle(model: model) }
-                }
-                ToolbarItemGroup {
-                    // Without a drawn title nothing fills the middle; keep the buttons on the right.
-                    Spacer()
-                    Picker("Layout", selection: $mode) {
-                        Label("Stacked", systemImage: "rectangle.split.1x2").tag(DiffMode.unified)
-                        Label("Side by Side", systemImage: "rectangle.split.2x1").tag(DiffMode.split)
-                    }
-                    .pickerStyle(.segmented)
-                    .help("Stacked (⌘1) / Side by side (⌘2)")
-
-                    Toggle(isOn: $wrapLines) {
-                        Label("Wrap Lines", systemImage: "arrow.turn.down.left")
-                    }
-                    .toggleStyle(.button)
-                    .help("Wrap long lines (⌥Z)")
-
-                    Button { Task { await model.refresh() } } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
-                    .help("Refresh (⇧⌘R)")
-                    .disabled(model.root == nil)
-                }
+        Group {
+            if showsChrome && model.sidebarTab == .history {
+                CommitDetailView(model: model, mode: mode)
+            } else {
+                DiffDetailView(model: model, mode: mode, showsFileList: showsChrome)
             }
+        }
+        .toolbar {
+            if #available(macOS 26, *) {
+                ToolbarItem(placement: .navigation) { RepoTitle(model: model) }
+                    .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .navigation) { RepoTitle(model: model) }
+            }
+            ToolbarItemGroup {
+                // Without a drawn title nothing fills the middle; keep the buttons on the right.
+                Spacer()
+                Picker("Layout", selection: $mode) {
+                    Label("Stacked", systemImage: "rectangle.split.1x2").tag(DiffMode.unified)
+                    Label("Side by Side", systemImage: "rectangle.split.2x1").tag(DiffMode.split)
+                }
+                .pickerStyle(.segmented)
+                .help("Stacked (⌘1) / Side by side (⌘2)")
+
+                Toggle(isOn: $wrapLines) {
+                    Label("Wrap Lines", systemImage: "arrow.turn.down.left")
+                }
+                .toggleStyle(.button)
+                .help("Wrap long lines (⌥Z)")
+
+                Button { Task { await model.refresh() } } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .help("Refresh (⇧⌘R)")
+                .disabled(model.root == nil)
+            }
+        }
     }
 
     var body: some View {
@@ -52,13 +58,14 @@ struct ContentView: View {
                 VStack(spacing: 0) {
                     // The file list is essential: always visible, no toggle, can't be collapsed.
                     NavigationSplitView(columnVisibility: .constant(.all)) {
-                        FileListView(model: model, handle: handle)
+                        SidebarView(model: model, handle: handle)
                             .navigationSplitViewColumnWidth(min: 200, ideal: 280, max: 500)
                             .toolbar(removing: .sidebarToggle)
                     } detail: {
                         diffView
                     }
-                    AnnotationsPane(model: model)
+                    // Commits in the history can't be annotated; the pane is for the working tree.
+                    if model.sidebarTab != .history { AnnotationsPane(model: model) }
                 }
             } else {
                 diffView
@@ -69,7 +76,7 @@ struct ContentView: View {
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         // The window title names the file (Window menu, Mission Control) but isn't drawn in the
         // toolbar; the toolbar shows the repository and its branch instead.
-        .navigationTitle(model.selection.map { ($0 as NSString).lastPathComponent } ?? model.repoName)
+        .navigationTitle(windowTitle)
         .toolbar(removing: .title)
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first else { return false }
@@ -87,6 +94,16 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await model.refresh() }
         }
+    }
+}
+
+extension ContentView {
+    /// The shown file's name, or the shown commit's subject on the History tab.
+    fileprivate var windowTitle: String {
+        if showsChrome && model.sidebarTab == .history {
+            return model.commits.first { $0.id == model.selectedCommit }?.subject ?? model.repoName
+        }
+        return model.selection.map { ($0 as NSString).lastPathComponent } ?? model.repoName
     }
 }
 
@@ -115,14 +132,67 @@ private struct RepoTitle: View {
     }
 }
 
+// MARK: - Sidebar
+
+/// The sidebar: Changes | Files | History tabs above the list.
+struct SidebarView: View {
+    @ObservedObject var model: RepoModel
+    let handle: WindowHandle
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("Show", selection: $model.sidebarTab) {
+                ForEach(SidebarTab.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .help("Changed files (⌃⌘1), all files (⌃⌘2), or the commit history (⌃⌘3)")
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+
+            if model.sidebarTab == .history {
+                HistoryListView(model: model, handle: handle)
+            } else {
+                FileListView(model: model, handle: handle, showAll: model.sidebarTab == .files)
+            }
+        }
+    }
+}
+
+/// The sidebar's toolbar button for opening another repository.
+struct OpenRepositoryButton: View {
+    let handle: WindowHandle
+    var body: some View {
+        Button { WindowRouter.shared.chooseRepository(preferring: handle) } label: {
+            Label("Open Repository", systemImage: "folder")
+        }
+        .help("Open Repository (⌘O)")
+    }
+}
+
+/// The overlay for a window without a repository.
+struct NoRepositoryView: View {
+    let handle: WindowHandle
+    var body: some View {
+        ContentUnavailableView {
+            Label("No Repository", systemImage: "folder")
+        } description: {
+            Text("Open a git repository, drop a folder here, or run “jrev” in a repository.")
+        } actions: {
+            Button("Open Repository…") { WindowRouter.shared.chooseRepository(preferring: handle) }
+        }
+    }
+}
+
 // MARK: - File list
 
 struct FileListView: View {
     @ObservedObject var model: RepoModel
     let handle: WindowHandle
+    /// Files tab: unchanged files are listed too.
+    let showAll: Bool
     @AppStorage(FontPrefs.listFamily) private var family = ""
     @AppStorage(FontPrefs.listSize) private var size = FontPrefs.defaultListSize
-    @AppStorage("showAllFiles") private var showAll = false
 
     /// The file's diff in a window of its own (no file list, no annotations pane).
     private func openInNewWindow(_ path: String) {
@@ -140,11 +210,11 @@ struct FileListView: View {
         List(selection: listSelection) {
             FileTreeRows(nodes: tree, font: font, size: size, isExpanded: isExpanded)
         }
-        // A fresh list for changed files and for all files: changing one list's rows wholesale
-        // leaves stale rows (the old selection) drawn over others.
+        // A fresh list for Changes and for Files: changing one list's rows wholesale leaves
+        // stale rows (the old selection) drawn over others.
         .id(showAll)
         // Reveal this tab's file when the tab/window becomes active or shows another file
-        // (and once the list has loaded, if the file wasn't listed yet, or after switching lists).
+        // (and once the list has loaded, if the file wasn't listed yet, or on switching tabs).
         .onAppear { reveal(model.selection, in: tree, proxy: proxy) }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
             if (note.object as? NSWindow) === handle.window { reveal(model.selection, in: tree, proxy: proxy) }
@@ -161,33 +231,17 @@ struct FileListView: View {
                 FileOpenMenuItems(root: model.root, path: path)
             }
         }
-        .onChange(of: showAll) { Task { await model.refresh() } }
-        // File-list controls live in the sidebar's part of the toolbar (right-aligned).
+        // Sidebar controls live in the sidebar's part of the toolbar (right-aligned).
         .toolbar {
             ToolbarItemGroup {
                 Spacer()
-                Toggle(isOn: $showAll) {
-                    Label("Show All Files", systemImage: "list.bullet.indent")
-                }
-                .toggleStyle(.button)
-                .help("Show all files, not just changed ones (⇧⌘A)")
-
-                Button { WindowRouter.shared.chooseRepository(preferring: handle) } label: {
-                    Label("Open Repository", systemImage: "folder")
-                }
-                .help("Open Repository (⌘O)")
+                OpenRepositoryButton(handle: handle)
             }
         }
         }
         .overlay {
             if model.root == nil {
-                ContentUnavailableView {
-                    Label("No Repository", systemImage: "folder")
-                } description: {
-                    Text("Open a git repository, drop a folder here, or run “jrev” in a repository.")
-                } actions: {
-                    Button("Open Repository…") { WindowRouter.shared.chooseRepository(preferring: handle) }
-                }
+                NoRepositoryView(handle: handle)
             } else if model.changes.isEmpty && !showAll {
                 ContentUnavailableView("No Changes", systemImage: "checkmark.circle",
                                        description: Text("Nothing differs from HEAD."))
@@ -533,15 +587,9 @@ struct DiffDetailView: View {
                             }
                         }
                     }
-                    .font(font)
                     .coordinateSpace(.named(DiffLines.space))
-                    // Line height: extra space split above/below each row, and between wrapped lines.
-                    .lineSpacing((lineHeight - 1) * size)
-                    .environment(\.diffLinePadding, (lineHeight - 1) * size / 2)
-                    .environment(\.diffColumnWidth, column)
-                    .environment(\.diffLineNumberColor, theme.lineNumber.map { Color(nsColor: $0) })
-                    .foregroundStyle(theme.text.map { Color(nsColor: $0) } ?? Color.primary)
-                    .environment(\.diffLineMode, lineMode)
+                    .diffRowsStyle(font: font, size: size, lineHeight: lineHeight, column: column,
+                                   theme: theme, lineMode: lineMode)
                     .frame(width: lineMode == .scroll ? max(viewport.size.width, contentWidth) : nil,
                            alignment: .topLeading)
                 }
@@ -696,11 +744,28 @@ enum DiffLineMode {
     case truncate   // one line, cut off with "…" (side by side without wrapping)
 }
 
+private struct DiffAnnotatableKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
 private struct DiffLineModeKey: EnvironmentKey {
     static let defaultValue = DiffLineMode.wrap
 }
 
 extension View {
+    /// Font, line height, theme colors and line mode for diff rows.
+    func diffRowsStyle(font: Font, size: Double, lineHeight: Double, column: CGFloat,
+                       theme: SyntaxTheme, lineMode: DiffLineMode) -> some View {
+        self.font(font)
+            // Line height: extra space split above/below each row, and between wrapped lines.
+            .lineSpacing((lineHeight - 1) * size)
+            .environment(\.diffLinePadding, (lineHeight - 1) * size / 2)
+            .environment(\.diffColumnWidth, column)
+            .environment(\.diffLineNumberColor, theme.lineNumber.map { Color(nsColor: $0) })
+            .foregroundStyle(theme.text.map { Color(nsColor: $0) } ?? Color.primary)
+            .environment(\.diffLineMode, lineMode)
+    }
+
     /// Applies the current line mode to a line of diff text.
     func diffLine(_ mode: DiffLineMode) -> some View {
         lineLimit(mode == .wrap ? nil : 1)
@@ -720,6 +785,13 @@ extension EnvironmentValues {
     var diffLinePadding: CGFloat {
         get { self[DiffLinePaddingKey.self] }
         set { self[DiffLinePaddingKey.self] = newValue }
+    }
+
+    /// False for commits in the history: lines can't be marked or annotated, and the working
+    /// tree's notes aren't shown on them.
+    var diffAnnotatable: Bool {
+        get { self[DiffAnnotatableKey.self] }
+        set { self[DiffAnnotatableKey.self] = newValue }
     }
 
     /// How long diff lines are shown (wrap / scroll sideways / truncate).
@@ -771,10 +843,16 @@ private struct AnnotatableLine: ViewModifier {
     let text: AttributedString
     @StateObject private var hovered = Box(false)
     @StateObject private var pressed = Box(false)
+    @Environment(\.diffAnnotatable) private var annotatable
 
+    @ViewBuilder
     func body(content: Content) -> some View {
+        if annotatable { annotatableBody(content) } else { content }
+    }
+
+    private func annotatableBody(_ content: Content) -> some View {
         let marked = model.isMarked(target)
-        content
+        return content
             .overlay(Color.accentColor.opacity(marked ? 0.2 : 0).allowsHitTesting(false))
             // Marked lines: a solid bar down the left edge.
             .overlay(alignment: .leading) {
@@ -839,6 +917,7 @@ private struct RangeMarker: View {
 
 struct UnifiedRowView: View {
     @ObservedObject var model: RepoModel
+    @Environment(\.diffAnnotatable) private var annotatable
     @Environment(\.diffLinePadding) private var linePadding
     @Environment(\.diffColumnWidth) private var columnWidth
     @Environment(\.diffLineMode) private var lineMode
@@ -869,10 +948,12 @@ struct UnifiedRowView: View {
                 .padding(.vertical, linePadding)
                 .background(GutterBackground(kind: row.kind,
                                              width: (gutter + 4) * (singleNumber ? 1 : 2) + 16))
-                .overlay(alignment: .leading) { RangeMarker(visible: model.isInRange(path: path, key: key)) }
+                .overlay(alignment: .leading) {
+                    RangeMarker(visible: annotatable && model.isInRange(path: path, key: key))
+                }
                 .modifier(AnnotatableLine(model: model, target: target, text: row.text))
 
-                ForEach(model.notesEnding(path: path, key: key)) { note in
+                ForEach(annotatable ? model.notesEnding(path: path, key: key) : []) { note in
                     AnnotationNoteView(annotation: note, indent: gutter * (singleNumber ? 1 : 2) + 24 + columnWidth,
                                        onEdit: { model.editing = EditTarget(path: path, key: note.key, rowID: row.id,
                                                                             column: 0, endLine: note.endLine) },
@@ -885,6 +966,7 @@ struct UnifiedRowView: View {
 
 struct SplitRowView: View {
     @ObservedObject var model: RepoModel
+    @Environment(\.diffAnnotatable) private var annotatable
     @Environment(\.diffColumnWidth) private var columnWidth
     let path: String
     let row: SplitRow
@@ -904,7 +986,7 @@ struct SplitRowView: View {
                 }
                 .fixedSize(horizontal: false, vertical: true) // both halves take the taller height
 
-                notes
+                if annotatable { notes }
             }
         }
     }
@@ -936,6 +1018,7 @@ struct SplitRowView: View {
 
 private struct SideCellView: View {
     @ObservedObject var model: RepoModel
+    @Environment(\.diffAnnotatable) private var annotatable
     @Environment(\.diffLinePadding) private var linePadding
     @Environment(\.diffColumnWidth) private var columnWidth
     @Environment(\.diffLineMode) private var lineMode
@@ -961,7 +1044,9 @@ private struct SideCellView: View {
             .padding(.vertical, linePadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(GutterBackground(kind: cell.kind, width: gutter + 4 + 14))
-            .overlay(alignment: .leading) { RangeMarker(visible: model.isInRange(path: path, key: cell.key)) }
+            .overlay(alignment: .leading) {
+                RangeMarker(visible: annotatable && model.isInRange(path: path, key: cell.key))
+            }
             .modifier(AnnotatableLine(
                 model: model,
                 target: EditTarget(path: path, key: cell.key, rowID: rowID, column: column),

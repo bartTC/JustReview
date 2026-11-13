@@ -107,21 +107,7 @@ enum Git {
         let r = try run(["diff", base, "--name-status", "-z", "-M", "--no-ext-diff"], in: root)
         guard r.status == 0 else { throw GitError(message: "git diff failed.") }
 
-        var changes: [FileChange] = []
-        let parts = r.text.split(separator: "\0", omittingEmptySubsequences: true).map(String.init)
-        var i = 0
-        while i < parts.count {
-            guard let status = parts[i].first else { i += 1; continue }
-            if status == "R" || status == "C", i + 2 < parts.count {
-                changes.append(FileChange(status: status, path: parts[i + 2], oldPath: parts[i + 1]))
-                i += 3
-            } else if i + 1 < parts.count {
-                changes.append(FileChange(status: status, path: parts[i + 1], oldPath: nil))
-                i += 2
-            } else {
-                break
-            }
-        }
+        var changes = parseNameStatus(r.text)
 
         let untracked = try run(["ls-files", "--others", "--exclude-standard", "-z"], in: root)
         for path in untracked.text.split(separator: "\0", omittingEmptySubsequences: true) {
@@ -183,5 +169,118 @@ enum Git {
         if lines.last == "" { lines.removeLast() }
         guard !lines.isEmpty else { return "" }
         return "@@ -1,\(lines.count) +1,\(lines.count) @@\n" + lines.map { " " + $0 }.joined(separator: "\n")
+    }
+}
+
+// MARK: - History
+
+/// One commit in the history list.
+struct Commit: Identifiable, Hashable {
+    let id: String          // full hash
+    let shortHash: String
+    let author: String
+    let date: Date
+    let subject: String
+    /// Branch and tag names pointing at the commit ("HEAD -> main", "tag: v1.0.0", …).
+    let refs: [String]
+}
+
+/// A commit with its full message and its changes, one diff per file.
+struct CommitDetails {
+    let hash: String
+    let parents: [String]
+    let author: String
+    let email: String
+    let date: Date
+    let subject: String
+    let body: String
+    let files: [(change: FileChange, patch: String)]
+}
+
+extension Git {
+    private static let fieldSep = "\u{1f}", recordSep = "\u{1e}"
+
+    /// The newest `limit` commits reachable from HEAD (empty in a repo without commits).
+    static func log(in root: URL, limit: Int) throws -> [Commit] {
+        let r = try run(["log", "-n", String(limit), "--no-color",
+                         "--format=%H%x1f%h%x1f%an%x1f%at%x1f%D%x1f%s%x1e"], in: root)
+        guard r.status == 0 else { return [] }
+        return r.text.components(separatedBy: recordSep).compactMap { record in
+            let f = record.trimmingCharacters(in: .newlines).components(separatedBy: fieldSep)
+            guard f.count == 6 else { return nil }
+            let refs = f[4].isEmpty ? [] : f[4].components(separatedBy: ", ")
+            return Commit(id: f[0], shortHash: f[1], author: f[2],
+                          date: Date(timeIntervalSince1970: TimeInterval(f[3]) ?? 0),
+                          subject: f[5], refs: refs)
+        }
+    }
+
+    /// The commit's message and per-file diffs against its first parent (all files added for the
+    /// root commit).
+    static func commitDetails(_ hash: String, in root: URL) throws -> CommitDetails {
+        let info = try run(["show", "-s", "--no-color",
+                            "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%b", hash], in: root)
+        guard info.status == 0 else { throw GitError(message: "Commit \(hash) not found.") }
+        let f = info.text.components(separatedBy: fieldSep)
+        guard f.count >= 7 else { throw GitError(message: "Commit \(hash) not found.") }
+
+        let diffArgs = ["--format=", "--diff-merges=first-parent", "-M", "--no-color", "--no-ext-diff"]
+        let names = try run(["show"] + diffArgs + ["--name-status", "-z", hash], in: root)
+        let patch = try run(["show"] + diffArgs + ["-p", hash], in: root)
+        let changes = parseNameStatus(names.text)
+        let chunks = splitPatch(patch.text)
+        // Both come from the same diff, in the same order; pair them up.
+        let files = changes.enumerated().map { i, change in
+            (change: change, patch: chunks[safe: i] ?? "")
+        }
+        return CommitDetails(hash: f[0], parents: f[1].split(separator: " ").map(String.init),
+                             author: f[2], email: f[3],
+                             date: Date(timeIntervalSince1970: TimeInterval(f[4]) ?? 0),
+                             subject: f[5], body: f[6...].joined(separator: fieldSep)
+                                .trimmingCharacters(in: .whitespacesAndNewlines),
+                             files: files)
+    }
+
+    /// A file's content at a revision, or nil if it doesn't exist there.
+    static func show(_ path: String, at rev: String, in root: URL) -> String? {
+        guard let r = try? run(["show", "\(rev):\(path)"], in: root), r.status == 0 else { return nil }
+        return r.text
+    }
+
+    /// `--name-status -z` output as file changes (renames/copies carry their old path).
+    static func parseNameStatus(_ text: String) -> [FileChange] {
+        var changes: [FileChange] = []
+        let parts = text.split(separator: "\0", omittingEmptySubsequences: true).map(String.init)
+        var i = 0
+        while i < parts.count {
+            guard let status = parts[i].first else { i += 1; continue }
+            if status == "R" || status == "C", i + 2 < parts.count {
+                changes.append(FileChange(status: status, path: parts[i + 2], oldPath: parts[i + 1]))
+                i += 3
+            } else if i + 1 < parts.count {
+                changes.append(FileChange(status: status, path: parts[i + 1], oldPath: nil))
+                i += 2
+            } else {
+                break
+            }
+        }
+        return changes
+    }
+
+    /// A multi-file patch cut into one piece per file (each starting at its "diff --git" line).
+    static func splitPatch(_ text: String) -> [String] {
+        var chunks: [String] = []
+        var current: [Substring] = []
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("diff --git ") || line.hasPrefix("diff --cc ") {
+                if !current.isEmpty { chunks.append(current.joined(separator: "\n")) }
+                current = []
+            }
+            current.append(line)
+        }
+        if !current.isEmpty, current.contains(where: { $0.hasPrefix("diff ") }) {
+            chunks.append(current.joined(separator: "\n"))
+        }
+        return chunks
     }
 }

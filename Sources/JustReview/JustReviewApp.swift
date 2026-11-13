@@ -68,9 +68,16 @@ struct AppCommands: Commands {
     @FocusedObject private var model: RepoModel?
     @FocusedObject private var handle: WindowHandle?
     @AppStorage("diffMode") private var mode: DiffMode = .unified
-    @AppStorage("showAllFiles") private var showAll = false
     @AppStorage("wrapLines") private var wrapLines = true
     @AppStorage("annotationsCollapsed") private var annotationsCollapsed = false
+
+    /// Switches the sidebar to a tab (⌃⌘1/2/3); a checkmark shows the current one.
+    private func sidebarTabButton(_ tab: SidebarTab, key: KeyEquivalent) -> some View {
+        Toggle(tab.title, isOn: Binding(get: { model?.sidebarTab == tab },
+                                        set: { if $0 { model?.sidebarTab = tab } }))
+            .keyboardShortcut(key, modifiers: [.control, .command])
+            .disabled(model == nil || handle?.showsChrome == false)
+    }
 
     var body: some Commands {
         CommandGroup(after: .appSettings) {
@@ -110,8 +117,9 @@ struct AppCommands: Commands {
             Toggle("Wrap Lines", isOn: $wrapLines)
                 .keyboardShortcut("z", modifiers: .option)
             Divider()
-            Toggle("Show All Files", isOn: $showAll)
-                .keyboardShortcut("a", modifiers: [.command, .shift])
+            sidebarTabButton(.changes, key: "1")
+            sidebarTabButton(.files, key: "2")
+            sidebarTabButton(.history, key: "3")
             Toggle("Show Annotations", isOn: Binding(get: { !annotationsCollapsed },
                                                      set: { annotationsCollapsed = !$0 }))
                 .keyboardShortcut("a", modifiers: [.command, .option])
@@ -122,17 +130,20 @@ struct AppCommands: Commands {
             Divider()
         }
         CommandMenu("Navigate") {
+            let inHistory = model?.sidebarTab == .history
             Button("Next Change") { model?.changeJump = ChangeJump(forward: true) }
                 .keyboardShortcut(.downArrow, modifiers: [.option, .command])
+                .disabled(inHistory)
             Button("Previous Change") { model?.changeJump = ChangeJump(forward: false) }
                 .keyboardShortcut(.upArrow, modifiers: [.option, .command])
+                .disabled(inHistory)
             Divider()
             Button("Next File") { model?.selectAdjacentFile(forward: true) }
                 .keyboardShortcut(.rightArrow, modifiers: [.option, .command])
-                .disabled(handle?.showsChrome == false)
+                .disabled(handle?.showsChrome == false || inHistory)
             Button("Previous File") { model?.selectAdjacentFile(forward: false) }
                 .keyboardShortcut(.leftArrow, modifiers: [.option, .command])
-                .disabled(handle?.showsChrome == false)
+                .disabled(handle?.showsChrome == false || inHistory)
         }
         // ⌘C copies the marked lines' code, or else all annotations — except while editing text
         // (e.g. an annotation), where Cut/Copy/Paste/Select All behave as usual.
