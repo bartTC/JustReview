@@ -20,6 +20,8 @@ All notable changes to JustReview. The format follows
 
 - Switching between changed and all files could leave an old row drawn over another one in
   the file list.
+- A selected unchanged file's name stays readable (white) instead of dimmed grey on the
+  selection color.
 
 ## [1.0.0] - 2026-11-12
 

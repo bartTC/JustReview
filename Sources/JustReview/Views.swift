@@ -208,7 +208,8 @@ struct FileListView: View {
         let tree = FileTree.build(model.changes + (showAll ? model.unchanged : []))
         ScrollViewReader { proxy in
         List(selection: listSelection) {
-            FileTreeRows(nodes: tree, font: font, size: size, isExpanded: isExpanded)
+            FileTreeRows(nodes: tree, font: font, size: size, selection: model.selection,
+                         isExpanded: isExpanded)
         }
         // A fresh list for Changes and for Files: changing one list's rows wholesale leaves
         // stale rows (the old selection) drawn over others.
@@ -360,15 +361,18 @@ private struct FileTreeRows: View {
     let nodes: [FileTreeNode]
     let font: Font
     let size: Double
+    let selection: String?
     let isExpanded: (FileTreeNode) -> Binding<Bool>
 
     var body: some View {
         ForEach(nodes) { node in
             if let change = node.change {
-                FileRow(change: change, font: font, size: size).tag(change.id)
+                FileRow(change: change, font: font, size: size, isSelected: change.id == selection)
+                    .tag(change.id)
             } else {
                 DisclosureGroup(isExpanded: isExpanded(node)) {
-                    FileTreeRows(nodes: node.children, font: font, size: size, isExpanded: isExpanded)
+                    FileTreeRows(nodes: node.children, font: font, size: size, selection: selection,
+                                 isExpanded: isExpanded)
                 } label: {
                     HStack(spacing: 7) {
                         Image(systemName: "folder")
@@ -393,13 +397,16 @@ struct FileRow: View {
     let change: FileChange
     let font: Font
     let size: Double
+    /// The selected row: text on the selection color.
+    var isSelected = false
 
     var body: some View {
         HStack(spacing: 7) {
+            // Unchanged files are dimmed, except when selected: there the text turns white.
             Text(change.fileName)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .foregroundStyle(change.isUnchanged ? .secondary : .primary)
+                .foregroundStyle(change.isUnchanged && !isSelected ? .secondary : .primary)
             Spacer(minLength: 4)
             if !change.isUnchanged {
                 StatusBadge(label: change.statusLabel, size: size)
