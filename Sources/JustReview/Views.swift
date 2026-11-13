@@ -7,6 +7,7 @@ struct ContentView: View {
     var showsChrome = true
     @AppStorage("diffMode") private var mode: DiffMode = .unified
     @AppStorage("wrapLines") private var wrapLines = true
+    @AppStorage(RepoModel.showBlameKey) private var showBlame = false
 
     /// The diff with its toolbar items. They're declared on the detail column itself so they
     /// (and the spacer pushing the buttons right) land in the detail part of the toolbar.
@@ -40,6 +41,13 @@ struct ContentView: View {
                 }
                 .toggleStyle(.button)
                 .help("Wrap long lines (⌥Z)")
+
+                Toggle(isOn: $showBlame) {
+                    Label("Show Blame", systemImage: "person.text.rectangle")
+                }
+                .toggleStyle(.button)
+                .help("Show who last changed each line (⌥⌘B)")
+                .disabled(showsChrome && model.sidebarTab == .history)
 
                 Button { Task { await model.refresh() } } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
@@ -446,6 +454,7 @@ struct DiffDetailView: View {
     @AppStorage(FontPrefs.lineHeight) private var lineHeight = FontPrefs.defaultLineHeight
     @AppStorage("syntaxHighlighting") private var syntaxHighlighting = true
     @AppStorage("wrapLines") private var wrapLines = true
+    @AppStorage(RepoModel.showBlameKey) private var showBlame = false
     @AppStorage(ThemePrefs.lightKey) private var lightTheme = ThemeStore.defaultLight
     @AppStorage(ThemePrefs.darkKey) private var darkTheme = ThemeStore.defaultDark
     @Environment(\.colorScheme) private var colorScheme
@@ -469,6 +478,7 @@ struct DiffDetailView: View {
             .onChange(of: lightTheme) { model.reloadDiff() }
             .onChange(of: darkTheme) { model.reloadDiff() }
             .onChange(of: colorScheme) { model.reloadDiff() }
+            .onChange(of: showBlame) { model.loadBlame() }
     }
 
     @ViewBuilder
@@ -571,7 +581,10 @@ struct DiffDetailView: View {
             let lineMode: DiffLineMode = wrapLines ? .wrap : (layout == .split ? .truncate : .scroll)
             let codeWidth = CGFloat(diff.maxColumns) * FontPrefs.digitWidth(nsFont) + 16
             let column = FontPrefs.digitWidth(nsFont)
-            let contentWidth = gutter * (change.isUnchanged ? 1 : 2) + 16 + column + codeWidth
+            // Blame column: only for files that exist at HEAD (it stays empty until blame loads).
+            let blameWidth: CGFloat? = showBlame && change.hasBase ? (size * 15).rounded() : nil
+            let blame = model.blameRows.flatMap { $0.changeID == change.id ? $0 : nil }
+            let contentWidth = (blameWidth ?? 0) + gutter * (change.isUnchanged ? 1 : 2) + 16 + column + codeWidth
 
             GeometryReader { viewport in
             ScrollViewReader { proxy in
@@ -586,17 +599,20 @@ struct DiffDetailView: View {
                         case .unified:
                             ForEach(diff.unified) {
                                 UnifiedRowView(model: model, path: change.path, row: $0, gutter: gutter,
-                                               singleNumber: change.isUnchanged)
+                                               singleNumber: change.isUnchanged, blame: blame?.unified[$0.id])
                             }
                         case .split:
                             ForEach(diff.split) {
-                                SplitRowView(model: model, path: change.path, row: $0, gutter: gutter)
+                                SplitRowView(model: model, path: change.path, row: $0, gutter: gutter,
+                                             blame: blame?.split[$0.id])
                             }
                         }
                     }
                     .coordinateSpace(.named(DiffLines.space))
                     .diffRowsStyle(font: font, size: size, lineHeight: lineHeight, column: column,
                                    theme: theme, lineMode: lineMode)
+                    .environment(\.diffBlameWidth, blameWidth)
+                    .environment(\.diffBlameOpensCommit, showsFileList)
                     .frame(width: lineMode == .scroll ? max(viewport.size.width, contentWidth) : nil,
                            alignment: .topLeading)
                 }
@@ -751,6 +767,14 @@ enum DiffLineMode {
     case truncate   // one line, cut off with "…" (side by side without wrapping)
 }
 
+private struct DiffBlameWidthKey: EnvironmentKey {
+    static let defaultValue: CGFloat? = nil
+}
+
+private struct DiffBlameOpensCommitKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
 private struct DiffAnnotatableKey: EnvironmentKey {
     static let defaultValue = true
 }
@@ -792,6 +816,19 @@ extension EnvironmentValues {
     var diffLinePadding: CGFloat {
         get { self[DiffLinePaddingKey.self] }
         set { self[DiffLinePaddingKey.self] = newValue }
+    }
+
+    /// Width of the blame column at the left of each line; nil when it isn't shown.
+    var diffBlameWidth: CGFloat? {
+        get { self[DiffBlameWidthKey.self] }
+        set { self[DiffBlameWidthKey.self] = newValue }
+    }
+
+    /// Whether clicking a name in the blame column shows its commit (not in a file's own window,
+    /// which has no History tab).
+    var diffBlameOpensCommit: Bool {
+        get { self[DiffBlameOpensCommitKey.self] }
+        set { self[DiffBlameOpensCommitKey.self] = newValue }
     }
 
     /// False for commits in the history: lines can't be marked or annotated, and the working
@@ -922,17 +959,67 @@ private struct RangeMarker: View {
     }
 }
 
+/// The blame column of one line: author and age at the first line of each run of lines from
+/// the same commit. Click to see the commit on the History tab.
+private struct BlameCellView: View {
+    @ObservedObject var model: RepoModel
+    let cell: BlameCell?
+    let width: CGFloat
+    @Environment(\.diffLinePadding) private var linePadding
+    @Environment(\.diffBlameOpensCommit) private var opensCommit
+    @AppStorage(FontPrefs.diffSize) private var size = FontPrefs.defaultDiffSize
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let cell, cell.startsRun {
+                Text(cell.line.author)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+                Text(cell.line.date, format: .relative(presentation: .numeric, unitsStyle: .abbreviated))
+                    .lineLimit(1)
+                    .fixedSize()
+            } else {
+                Spacer(minLength: 0)
+            }
+        }
+        .font(.system(size: size * 0.9))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, linePadding)
+        .frame(width: width, alignment: .topLeading)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Color.secondary.opacity(0.05))
+        .overlay(alignment: .top) {
+            if cell?.followsRun == true { Rectangle().fill(Color.secondary.opacity(0.2)).frame(height: 1) }
+        }
+        .overlay(alignment: .trailing) {
+            Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { if opensCommit, let cell { model.showCommit(cell.line.commit) } }
+        .help(cell.map { blame in
+            "\(blame.line.summary)\n\(blame.line.author), "
+                + "\(blame.line.date.formatted(date: .long, time: .shortened)) · \(blame.line.commit.prefix(10))"
+                + (opensCommit ? "\nClick to show the commit" : "")
+        } ?? "")
+    }
+}
+
 struct UnifiedRowView: View {
     @ObservedObject var model: RepoModel
     @Environment(\.diffAnnotatable) private var annotatable
     @Environment(\.diffLinePadding) private var linePadding
     @Environment(\.diffColumnWidth) private var columnWidth
     @Environment(\.diffLineMode) private var lineMode
+    @Environment(\.diffBlameWidth) private var blameWidth
     let path: String
     let row: UnifiedRow
     let gutter: CGFloat
     /// One line-number column (file shown without a diff) instead of old + new.
     var singleNumber = false
+    /// Who last changed the line (blame column), if shown.
+    var blame: BlameCell? = nil
 
     var body: some View {
         if let header = row.header {
@@ -941,27 +1028,32 @@ struct UnifiedRowView: View {
             let target = EditTarget(path: path, key: key, rowID: row.id, column: 0)
             VStack(spacing: 0) {
                 let numberTint = DiffStyle.gutterText(row.kind)
-                HStack(alignment: .top, spacing: 0) {
-                    if !singleNumber { LineNumber(number: row.oldNo, width: gutter, tint: numberTint) }
-                    LineNumber(number: row.newNo, width: gutter, tint: numberTint)
-                    Text(DiffStyle.marker(row.kind))
-                        .foregroundStyle(numberTint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.secondary))
-                        .frame(width: 16)
-                    Text(row.text)
-                        .diffLine(lineMode)
-                        .padding(.leading, columnWidth)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 0) {
+                    if let blameWidth { BlameCellView(model: model, cell: blame, width: blameWidth) }
+                    HStack(alignment: .top, spacing: 0) {
+                        if !singleNumber { LineNumber(number: row.oldNo, width: gutter, tint: numberTint) }
+                        LineNumber(number: row.newNo, width: gutter, tint: numberTint)
+                        Text(DiffStyle.marker(row.kind))
+                            .foregroundStyle(numberTint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.secondary))
+                            .frame(width: 16)
+                        Text(row.text)
+                            .diffLine(lineMode)
+                            .padding(.leading, columnWidth)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.vertical, linePadding)
+                    .background(GutterBackground(kind: row.kind,
+                                                 width: (gutter + 4) * (singleNumber ? 1 : 2) + 16))
+                    .overlay(alignment: .leading) {
+                        RangeMarker(visible: annotatable && model.isInRange(path: path, key: key))
+                    }
+                    .modifier(AnnotatableLine(model: model, target: target, text: row.text))
                 }
-                .padding(.vertical, linePadding)
-                .background(GutterBackground(kind: row.kind,
-                                             width: (gutter + 4) * (singleNumber ? 1 : 2) + 16))
-                .overlay(alignment: .leading) {
-                    RangeMarker(visible: annotatable && model.isInRange(path: path, key: key))
-                }
-                .modifier(AnnotatableLine(model: model, target: target, text: row.text))
+                .fixedSize(horizontal: false, vertical: true) // the blame cell takes the line's height
 
                 ForEach(annotatable ? model.notesEnding(path: path, key: key) : []) { note in
-                    AnnotationNoteView(annotation: note, indent: gutter * (singleNumber ? 1 : 2) + 24 + columnWidth,
+                    AnnotationNoteView(annotation: note,
+                                       indent: (blameWidth ?? 0) + gutter * (singleNumber ? 1 : 2) + 24 + columnWidth,
                                        onEdit: { model.editing = EditTarget(path: path, key: note.key, rowID: row.id,
                                                                             column: 0, endLine: note.endLine) },
                                        onDelete: { model.removeAnnotation(note) })
@@ -975,9 +1067,12 @@ struct SplitRowView: View {
     @ObservedObject var model: RepoModel
     @Environment(\.diffAnnotatable) private var annotatable
     @Environment(\.diffColumnWidth) private var columnWidth
+    @Environment(\.diffBlameWidth) private var blameWidth
     let path: String
     let row: SplitRow
     let gutter: CGFloat
+    /// Who last changed the left (HEAD) line, if the blame column is shown.
+    var blame: BlameCell? = nil
 
     var body: some View {
         if let header = row.header {
@@ -985,6 +1080,7 @@ struct SplitRowView: View {
         } else {
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
+                    if let blameWidth { BlameCellView(model: model, cell: blame, width: blameWidth) }
                     SideCellView(model: model, path: path, rowID: row.id, column: 1, cell: row.left, gutter: gutter)
                     Rectangle()
                         .fill(Color(nsColor: .separatorColor))
@@ -993,7 +1089,7 @@ struct SplitRowView: View {
                 }
                 .fixedSize(horizontal: false, vertical: true) // both halves take the taller height
 
-                if annotatable { notes }
+                if annotatable { notes.padding(.leading, blameWidth ?? 0) }
             }
         }
     }

@@ -69,6 +69,7 @@ struct AppCommands: Commands {
     @FocusedObject private var handle: WindowHandle?
     @AppStorage("diffMode") private var mode: DiffMode = .unified
     @AppStorage("wrapLines") private var wrapLines = true
+    @AppStorage(RepoModel.showBlameKey) private var showBlame = false
     @AppStorage("annotationsCollapsed") private var annotationsCollapsed = false
 
     /// Switches the sidebar to a tab (⌃⌘1/2/3); a checkmark shows the current one.
@@ -116,6 +117,8 @@ struct AppCommands: Commands {
                 .keyboardShortcut("2")
             Toggle("Wrap Lines", isOn: $wrapLines)
                 .keyboardShortcut("z", modifiers: .option)
+            Toggle("Show Blame", isOn: $showBlame)
+                .keyboardShortcut("b", modifiers: [.option, .command])
             Divider()
             sidebarTabButton(.changes, key: "1")
             sidebarTabButton(.files, key: "2")

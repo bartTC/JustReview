@@ -284,3 +284,62 @@ extension Git {
         return chunks
     }
 }
+
+// MARK: - Blame
+
+/// Who last changed a line, and in which commit.
+struct BlameLine: Equatable {
+    let commit: String      // full hash
+    let author: String
+    let date: Date
+    let summary: String
+}
+
+extension Git {
+    /// The commit HEAD points at, or nil in a repo without commits.
+    static func headHash(in root: URL) -> String? {
+        guard let r = try? run(["rev-parse", "--verify", "-q", "HEAD"], in: root), r.status == 0 else { return nil }
+        return r.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Blame of a file at a revision, by line number (1-based). Empty if the file isn't there.
+    static func blame(_ path: String, at rev: String, in root: URL) -> [Int: BlameLine] {
+        guard let r = try? run(["blame", "--porcelain", rev, "--", path], in: root), r.status == 0 else { return [:] }
+        return parseBlame(r.text)
+    }
+
+    /// `git blame --porcelain`: each line starts with "<hash> <orig> <final> [<count>]", followed
+    /// by the commit's details the first time it appears, then the line's content after a tab.
+    static func parseBlame(_ text: String) -> [Int: BlameLine] {
+        var authors: [String: String] = [:], dates: [String: Date] = [:], summaries: [String: String] = [:]
+        var result: [Int: BlameLine] = [:]
+        var commit: String?
+        var lineNumber = 0
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("\t") {
+                if let commit {
+                    result[lineNumber] = BlameLine(commit: commit, author: authors[commit] ?? "",
+                                                   date: dates[commit] ?? .distantPast,
+                                                   summary: summaries[commit] ?? "")
+                }
+                continue
+            }
+            let parts = line.split(separator: " ", maxSplits: 1)
+            guard let key = parts.first else { continue }
+            let value = parts.count > 1 ? String(parts[1]) : ""
+            if key.count == 40, key.allSatisfy(\.isHexDigit) {
+                commit = String(key)
+                lineNumber = Int(value.split(separator: " ").dropFirst().first ?? "") ?? 0
+                continue
+            }
+            guard let commit else { continue }
+            switch key {
+            case "author": authors[commit] = value
+            case "author-time": dates[commit] = Date(timeIntervalSince1970: TimeInterval(value) ?? 0)
+            case "summary": summaries[commit] = value
+            default: break
+            }
+        }
+        return result
+    }
+}

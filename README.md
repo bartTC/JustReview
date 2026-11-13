@@ -27,6 +27,7 @@ macOS 15 or later on Apple Silicon.
   The LLM's changes show up automatically. When it changes an annotated line, that note is
   dropped, so only the open points remain.
 - **History:** browse the commits and read each one's changes, every file in one view.
+- **Blame:** who last changed each line and when; click a name to see that commit.
 - **Syntax highlighting** for Python, JavaScript, TypeScript, JSON, CSS, HTML, Bash, Go, Rust,
   Swift, YAML, Markdown and TOML.
 - **Themes:** every [Helix](https://docs.helix-editor.com/themes.html) theme is included. Pick
@@ -58,6 +59,7 @@ Choose **JustReview → Install Command Line Tool…** to get the `jrev` command
 | ⌥⌘→ / ⌥⌘← | Next / previous file |
 | ⌘1 / ⌘2 | Stacked / side by side |
 | ⌥Z | Wrap lines |
+| ⌥⌘B | Show blame |
 | ⌃⌘1 / ⌃⌘2 / ⌃⌘3 | Changes / all files / history |
 | ⌘-click | Open a file's diff in its own window |
 | ⌥⌘A | Show or hide annotations |

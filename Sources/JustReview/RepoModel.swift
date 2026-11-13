@@ -65,7 +65,17 @@ final class RepoModel: ObservableObject {
     @Published private(set) var changes: [FileChange] = []
     /// Unchanged files, populated only while "Show All Files" is on.
     @Published private(set) var unchanged: [FileChange] = []
-    @Published private(set) var rendered: RenderedDiff?
+    @Published private(set) var rendered: RenderedDiff? {
+        didSet { updateBlameRows() }
+    }
+    /// Blame of the shown file's HEAD version (while "Show Blame" is on).
+    private var blame: FileBlame? {
+        didSet { updateBlameRows() }
+    }
+    /// The blame column's content for the shown diff, by row.
+    @Published private(set) var blameRows: BlameRows?
+    private var blameCache: [String: [Int: BlameLine]] = [:]
+    private var blameGeneration = 0
     @Published var error: String?
     /// The line (or range) whose annotation popover is open.
     @Published var editing: EditTarget?
@@ -303,6 +313,7 @@ final class RepoModel: ObservableObject {
     }
 
     private func loadDiff() {
+        loadBlame()
         diffGeneration += 1
         let generation = diffGeneration
         guard let root, let change = selectedChange else {
@@ -387,6 +398,98 @@ extension RepoModel {
             case .failure(let error): commitError = error.localizedDescription
             }
         }
+    }
+}
+
+// MARK: - Blame
+
+/// Blame of one file's HEAD version, by HEAD line number.
+struct FileBlame {
+    let changeID: String
+    let lines: [Int: BlameLine]
+}
+
+/// One row's entry in the blame column; the name is shown at the first line of a run of lines
+/// from the same commit.
+struct BlameCell: Equatable {
+    let line: BlameLine
+    let startsRun: Bool
+    /// A run starting right below another one (gets a separator line).
+    let followsRun: Bool
+}
+
+/// The blame column for a rendered diff, by row id, for each layout.
+struct BlameRows {
+    let changeID: String
+    let unified: [Int: BlameCell]
+    let split: [Int: BlameCell]
+}
+
+extension FileChange {
+    /// The file existed at HEAD, so its lines there can be blamed.
+    var hasBase: Bool { !isUntracked && status != "A" }
+}
+
+extension RepoModel {
+    static let showBlameKey = "showBlame"
+
+    /// Loads blame for the shown file (HEAD version), from the cache when HEAD hasn't moved.
+    func loadBlame() {
+        blameGeneration += 1
+        let generation = blameGeneration
+        guard UserDefaults.standard.bool(forKey: Self.showBlameKey), let root, let change = selectedChange,
+              change.hasBase else {
+            blame = nil
+            return
+        }
+        let path = change.oldPath ?? change.path
+        if blame?.changeID != change.id { blame = nil }
+        Task {
+            guard let head = await Task.detached(operation: { Git.headHash(in: root) }).value else { return }
+            let key = head + ":" + path
+            var lines = blameCache[key]
+            if lines == nil {
+                let result = await Task.detached { Git.blame(path, at: head, in: root) }.value
+                if blameCache.count > 100 { blameCache.removeAll() }
+                blameCache[key] = result
+                lines = result
+            }
+            guard generation == blameGeneration, root == self.root, let lines else { return }
+            blame = FileBlame(changeID: change.id, lines: lines)
+        }
+    }
+
+    /// Shows a commit on the History tab (clicking a name in the blame column).
+    func showCommit(_ hash: String) {
+        sidebarTab = .history
+        selectedCommit = hash
+    }
+
+    /// Matches the blame to the rendered diff's rows: context and removed lines by their HEAD
+    /// line number; added lines and hunk headers have none and end a run.
+    fileprivate func updateBlameRows() {
+        guard let rendered, let blame, rendered.changeID == blame.changeID else {
+            if blameRows != nil { blameRows = nil }
+            return
+        }
+        func cells(_ rows: [(id: Int, oldLine: Int?)]) -> [Int: BlameCell] {
+            var result: [Int: BlameCell] = [:]
+            var previous: String?
+            for row in rows {
+                guard let number = row.oldLine, let line = blame.lines[number] else {
+                    previous = nil
+                    continue
+                }
+                let starts = line.commit != previous
+                result[row.id] = BlameCell(line: line, startsRun: starts, followsRun: starts && previous != nil)
+                previous = line.commit
+            }
+            return result
+        }
+        blameRows = BlameRows(
+            changeID: rendered.changeID,
+            unified: cells(rendered.unified.map { ($0.id, $0.header == nil ? $0.oldNo : nil) }),
+            split: cells(rendered.split.map { ($0.id, $0.header == nil ? $0.left?.number : nil) }))
     }
 }
 

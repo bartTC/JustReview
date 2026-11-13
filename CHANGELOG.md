@@ -8,6 +8,9 @@ All notable changes to JustReview. The format follows
 
 ### Added
 
+- Show Blame (⌥⌘B): who last changed each line and when, in a column next to the line
+  numbers, for every line that was already committed. Click a name to see its commit on the
+  History tab.
 - History tab: lists the commits; picking one shows its message and the changes of every file
   it touched, one after another (read-only, no annotations). Click a file's header to fold it.
 
