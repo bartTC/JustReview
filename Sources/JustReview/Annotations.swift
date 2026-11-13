@@ -607,7 +607,7 @@ struct AnnotationsPane: View {
     @ViewBuilder
     private var content: some View {
             if model.annotations.isEmpty {
-                Text("Click a line in the diff to annotate it.")
+                Text("Double-click a line in the diff to annotate it.")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
