@@ -738,7 +738,7 @@ struct DiffDetailView: View {
 // MARK: - Rows
 
 /// The break between two sections of a diff: a gap, then a band with "⋯" under the line
-/// numbers, the enclosing function lined up with the code, and how many lines are skipped.
+/// numbers and the enclosing function lined up with the code.
 private struct HunkHeaderView: View {
     let hunk: HunkInfo
     /// Width of the line-number columns and of the +/− marker column in front of the code.
@@ -762,14 +762,7 @@ private struct HunkHeaderView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .padding(.leading, columnWidth)
-            Spacer(minLength: 12)
-            if hunk.hiddenAbove > 0 {
-                Text("\(hunk.hiddenAbove) unchanged \(hunk.hiddenAbove == 1 ? "line" : "lines")")
-                    .font(.system(size: size * 0.85))
-                    .foregroundStyle(.tertiary)
-                    .fixedSize()
-                    .padding(.trailing, 10)
-            }
+                .padding(.trailing, 10)
         }
         .padding(.vertical, 3 + linePadding)
         .frame(maxWidth: .infinity, alignment: .leading)

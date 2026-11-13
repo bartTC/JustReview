@@ -19,7 +19,7 @@ All notable changes to JustReview. The format follows
 ### Changed
 
 - Sections of a diff are set apart by a gap and a quieter band showing the enclosing
-  function and how many unchanged lines are skipped, instead of git's raw "@@" line.
+  function, instead of git's raw "@@" line.
 - The sidebar has three tabs: Changes, Files and History (⌃⌘1/2/3). The Files tab replaces the
   Show All Files toggle (⇧⌘A).
 

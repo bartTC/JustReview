@@ -385,7 +385,8 @@ extension RepoModel {
                             },
                             new: { change.status == "D" ? nil : Git.show(change.path, at: hash, in: root) })
                         let diff = DiffRenderer.render(file.patch, changeID: change.id, tabWidth: tabWidth,
-                                                       showHunkHeaders: context != DiffContext.wholeFile, syntax: syntax, syntaxEnabled: highlight,
+                                                       showHunkHeaders: context != DiffContext.wholeFile,
+                                                       syntax: syntax, syntaxEnabled: highlight,
                                                        styler: ThemeStyler(theme: theme), dark: isDark)
                         return CommitFile(change: change, diff: diff)
                     }
