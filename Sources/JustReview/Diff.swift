@@ -112,6 +112,36 @@ struct LineKey: Hashable, Codable {
 
 extension RowKind: Codable {}
 
+/// A hunk header ("@@ -41,6 +42,13 @@ struct ContentView: View {"), parsed for display.
+struct HunkInfo: Equatable {
+    /// The enclosing function or type git found for the hunk (may be empty).
+    let context: String
+    /// Unchanged lines between the previous hunk (or the start of the file) and this one.
+    let hiddenAbove: Int
+    /// The first hunk of the file (no gap above it).
+    let isFirst: Bool
+
+    init(header: String, previousOldEnd: Int, isFirst: Bool) {
+        // "@@ -a,b +c,d @@ context": the part after the second "@@".
+        let parts = header.components(separatedBy: "@@")
+        context = parts.count > 2 ? parts[2...].joined(separator: "@@").trimmingCharacters(in: .whitespaces) : ""
+        let ranges = (parts.count > 1 ? parts[1] : "").split(separator: " ")
+        let oldStart = ranges.first.flatMap { Int($0.dropFirst().split(separator: ",").first ?? "") } ?? 0
+        hiddenAbove = max(0, oldStart - 1 - previousOldEnd)
+        self.isFirst = isFirst
+    }
+
+    /// Last old-file line covered by a hunk with this header.
+    static func oldEnd(of header: String) -> Int {
+        let parts = header.components(separatedBy: "@@")
+        guard parts.count > 1, let old = parts[1].split(separator: " ").first else { return 0 }
+        let numbers = old.dropFirst().split(separator: ",").compactMap { Int($0) }
+        guard let start = numbers.first else { return 0 }
+        let count = numbers.count > 1 ? numbers[1] : 1
+        return start + count - 1
+    }
+}
+
 struct UnifiedRow: Identifiable {
     let id: Int
     let header: String?
@@ -120,6 +150,8 @@ struct UnifiedRow: Identifiable {
     let oldNo: Int?
     let newNo: Int?
     let text: AttributedString
+    /// Set on hunk header rows.
+    var hunk: HunkInfo? = nil
 }
 
 struct SideCell {
@@ -134,6 +166,8 @@ struct SplitRow: Identifiable {
     let header: String?
     let left: SideCell?
     let right: SideCell?
+    /// Set on hunk header rows.
+    var hunk: HunkInfo? = nil
 }
 
 struct RenderedDiff {
@@ -189,7 +223,8 @@ enum DiffStyle {
         })
     }
 
-    static let hunkBG = Color.accentColor.opacity(0.09)
+    static let hunkBG = Color.accentColor.opacity(0.06)
+    static let hunkEdge = Color.accentColor.opacity(0.14)
     static let fillerBG = Color.secondary.opacity(0.06)
 
     /// The color behind a changed span (the renderer knows the appearance it renders for).
@@ -249,12 +284,15 @@ enum DiffRenderer {
         var split: [SplitRow] = []
         var maxNo = 0, added = 0, removed = 0
 
-        for hunk in diff.hunks {
+        var previousOldEnd = 0
+        for (index, hunk) in diff.hunks.enumerated() {
             if showHunkHeaders {
-            unified.append(UnifiedRow(id: unified.count, header: hunk.header, key: nil, kind: .context,
-                                      oldNo: nil, newNo: nil, text: AttributedString()))
-            split.append(SplitRow(id: split.count, header: hunk.header, left: nil, right: nil))
+                let info = HunkInfo(header: hunk.header, previousOldEnd: previousOldEnd, isFirst: index == 0)
+                unified.append(UnifiedRow(id: unified.count, header: hunk.header, key: nil, kind: .context,
+                                          oldNo: nil, newNo: nil, text: AttributedString(), hunk: info))
+                split.append(SplitRow(id: split.count, header: hunk.header, left: nil, right: nil, hunk: info))
             }
+            previousOldEnd = HunkInfo.oldEnd(of: hunk.header)
 
             var rem: [DiffLine] = []
             var add: [DiffLine] = []

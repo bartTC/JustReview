@@ -735,16 +735,47 @@ struct DiffDetailView: View {
 
 // MARK: - Rows
 
+/// The break between two sections of a diff: a gap, then a band with "⋯" under the line
+/// numbers, the enclosing function lined up with the code, and how many lines are skipped.
 private struct HunkHeaderView: View {
-    let text: String
+    let hunk: HunkInfo
+    /// Width of the line-number columns and of the +/− marker column in front of the code.
+    let numbersWidth: CGFloat
+    let markerWidth: CGFloat
+    @Environment(\.diffColumnWidth) private var columnWidth
+    @Environment(\.diffBlameWidth) private var blameWidth
+    @Environment(\.diffLinePadding) private var linePadding
+    @AppStorage(FontPrefs.diffSize) private var size = FontPrefs.defaultDiffSize
+
     var body: some View {
-        Text(text)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .padding(.vertical, 4)
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DiffStyle.hunkBG)
+        HStack(spacing: 0) {
+            Image(systemName: "ellipsis")
+                .font(.system(size: size * 0.85, weight: .semibold))
+                .foregroundStyle(.secondary)
+                // Right-aligned like the line numbers above and below it.
+                .frame(width: (blameWidth ?? 0) + numbersWidth - 4, alignment: .trailing)
+                .padding(.trailing, 4 + markerWidth)
+            Text(hunk.context)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .padding(.leading, columnWidth)
+            Spacer(minLength: 12)
+            if hunk.hiddenAbove > 0 {
+                Text("\(hunk.hiddenAbove) unchanged \(hunk.hiddenAbove == 1 ? "line" : "lines")")
+                    .font(.system(size: size * 0.85))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize()
+                    .padding(.trailing, 10)
+            }
+        }
+        .padding(.vertical, 3 + linePadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DiffStyle.hunkBG)
+        .overlay(alignment: .top) { Rectangle().fill(DiffStyle.hunkEdge).frame(height: 1) }
+        .overlay(alignment: .bottom) { Rectangle().fill(DiffStyle.hunkEdge).frame(height: 1) }
+        // Breathing room between sections (none above the first one).
+        .padding(.top, hunk.isFirst ? 0 : 14)
     }
 }
 
@@ -1022,8 +1053,8 @@ struct UnifiedRowView: View {
     var blame: BlameCell? = nil
 
     var body: some View {
-        if let header = row.header {
-            HunkHeaderView(text: header)
+        if let hunk = row.hunk {
+            HunkHeaderView(hunk: hunk, numbersWidth: (gutter + 4) * (singleNumber ? 1 : 2), markerWidth: 16)
         } else if let key = row.key {
             let target = EditTarget(path: path, key: key, rowID: row.id, column: 0)
             VStack(spacing: 0) {
@@ -1075,9 +1106,9 @@ struct SplitRowView: View {
     var blame: BlameCell? = nil
 
     var body: some View {
-        if let header = row.header {
-            HunkHeaderView(text: header)
-        } else {
+        if let hunk = row.hunk {
+            HunkHeaderView(hunk: hunk, numbersWidth: gutter + 4, markerWidth: 14)
+        } else if row.header == nil {
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
                     if let blameWidth { BlameCellView(model: model, cell: blame, width: blameWidth) }
