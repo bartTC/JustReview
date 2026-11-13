@@ -119,6 +119,8 @@ struct CommitDetailView: View {
     @Environment(\.colorScheme) private var colorScheme
     /// Files folded away by clicking their header.
     @StateObject private var collapsed = Box<Set<String>>([])
+    /// How far the content is scrolled sideways (unwrapped lines); headers move along.
+    @StateObject private var scrollX = Box<CGFloat>(0)
 
     private var theme: SyntaxTheme {
         ThemeStore.shared.theme(named: colorScheme == .dark ? darkTheme : lightTheme)
@@ -128,7 +130,10 @@ struct CommitDetailView: View {
 
     var body: some View {
         detail
-            .onChange(of: model.selectedCommit) { collapsed.value = [] }
+            .onChange(of: model.selectedCommit) {
+                collapsed.value = []
+                scrollX.value = 0   // the new commit starts scrolled to the left edge
+            }
             .onChange(of: tabWidth) { model.reloadDiff() }
             .onChange(of: syntaxHighlighting) { model.reloadDiff() }
             .onChange(of: lightTheme) { model.reloadDiff() }
@@ -164,37 +169,50 @@ struct CommitDetailView: View {
         let maxColumns = commit.files.map(\.diff.maxColumns).max() ?? 0
         let contentWidth = gutter * 2 + 16 + column + CGFloat(maxColumns) * column + 16
 
-        return GeometryReader { viewport in
-            ScrollView(lineMode == .scroll ? [.vertical, .horizontal] : .vertical) {
-                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    CommitMessageView(commit: commit)
-                        .frame(width: viewport.size.width, alignment: .leading)
-                    ForEach(commit.files) { file in
-                        Section {
-                            if !collapsed.value.contains(file.id) {
-                                fileContent(file, gutter: gutter)
-                            }
-                        } header: {
-                            CommitFileHeader(file: file, collapsed: collapsed.value.contains(file.id)) {
-                                if collapsed.value.contains(file.id) {
-                                    collapsed.value.remove(file.id)
-                                } else {
-                                    collapsed.value.insert(file.id)
+        let scrollsSideways = lineMode == .scroll
+
+        // The divider keeps the scroll view off the window's top edge; touching it, AppKit lets
+        // the content scroll under the (transparent) toolbar.
+        return VStack(spacing: 0) {
+            Divider()
+            GeometryReader { viewport in
+                ScrollView(scrollsSideways ? [.vertical, .horizontal] : .vertical) {
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        CommitMessageView(commit: commit)
+                            .stayInView(scrollsSideways, scrollX: scrollX.value, viewportWidth: viewport.size.width)
+                        ForEach(commit.files) { file in
+                            Section {
+                                if !collapsed.value.contains(file.id) {
+                                    fileContent(file, gutter: gutter)
                                 }
+                            } header: {
+                                CommitFileHeader(file: file, collapsed: collapsed.value.contains(file.id)) {
+                                    if collapsed.value.contains(file.id) {
+                                        collapsed.value.remove(file.id)
+                                    } else {
+                                        collapsed.value.insert(file.id)
+                                    }
+                                }
+                                .stayInView(scrollsSideways, scrollX: scrollX.value, viewportWidth: viewport.size.width)
                             }
-                            .frame(width: viewport.size.width, alignment: .leading)
                         }
                     }
+                    .diffRowsStyle(font: Font(nsFont as CTFont), size: size, lineHeight: lineHeight,
+                                   column: column, theme: theme, lineMode: lineMode)
+                    .environment(\.diffAnnotatable, false)
+                    .frame(width: scrollsSideways ? max(viewport.size.width, contentWidth) : nil,
+                           alignment: .topLeading)
                 }
-                .diffRowsStyle(font: Font(nsFont as CTFont), size: size, lineHeight: lineHeight,
-                               column: column, theme: theme, lineMode: lineMode)
-                .environment(\.diffAnnotatable, false)
-                .frame(width: lineMode == .scroll ? max(viewport.size.width, contentWidth) : nil,
-                       alignment: .topLeading)
+                .defaultScrollAnchor(.topLeading)
+                // Where the content is scrolled to sideways (headers follow it); only tracked while
+                // lines don't wrap, so vertical scrolling doesn't redraw anything.
+                // Only the horizontal offset: vertical scrolling shouldn't redraw anything.
+                .onScrollGeometryChange(for: CGFloat.self) { $0.visibleRect.minX } action: { _, x in
+                    if scrollsSideways { scrollX.value = x }
+                }
+                .id("\(commit.hash)|\(mode.rawValue)|\(wrapLines)") // back to the top on commit/mode/wrap change
+                .background(codeBackground)
             }
-            .defaultScrollAnchor(.topLeading)
-            .id("\(commit.hash)|\(mode.rawValue)|\(wrapLines)") // back to the top on commit/mode/wrap change
-            .background(codeBackground)
         }
     }
 
@@ -223,6 +241,27 @@ struct CommitDetailView: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
+    }
+}
+
+/// Width taken by the vertical scroll bar: only when scroll bars are always shown (they
+/// overlay the content otherwise).
+private var visibleScrollerWidth: CGFloat {
+    NSScroller.preferredScrollerStyle == .legacy
+        ? NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy) : 0
+}
+
+extension View {
+    /// Headers in the commit view: as wide as the visible area. When the content scrolls
+    /// sideways (unwrapped lines), they move along so they stay in view.
+    @ViewBuilder
+    fileprivate func stayInView(_ scrollsSideways: Bool, scrollX: CGFloat, viewportWidth: CGFloat) -> some View {
+        if scrollsSideways {
+            frame(width: max(viewportWidth - visibleScrollerWidth, 0), alignment: .leading)
+                .offset(x: scrollX)
+        } else {
+            frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 
