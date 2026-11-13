@@ -145,9 +145,16 @@ enum Git {
         return x[i].localizedStandardCompare(y[i]) == .orderedAscending
     }
 
-    static func diff(for change: FileChange, in root: URL) throws -> String {
+    /// The `-U` option for a number of context lines around each change (`DiffContext.wholeFile`:
+    /// enough to cover any file, so it's shown whole in one section).
+    static func contextArgument(_ lines: Int) -> String {
+        "-U\(lines == DiffContext.wholeFile ? 1_000_000 : max(lines, 0))"
+    }
+
+    /// - Parameter context: unchanged lines shown around each change (see `DiffContext`).
+    static func diff(for change: FileChange, in root: URL, context: Int = DiffContext.standard) throws -> String {
         if change.isUnchanged { return fullFile(change.path, in: root) }
-        var args = ["diff", "--no-color", "--no-ext-diff", "-M"]
+        var args = ["diff", "--no-color", "--no-ext-diff", "-M", contextArgument(context)]
         if change.isUntracked {
             args += ["--no-index", "--", "/dev/null", change.path]
         } else {
@@ -169,6 +176,20 @@ enum Git {
         if lines.last == "" { lines.removeLast() }
         guard !lines.isEmpty else { return "" }
         return "@@ -1,\(lines.count) +1,\(lines.count) @@\n" + lines.map { " " + $0 }.joined(separator: "\n")
+    }
+}
+
+/// How many unchanged lines diffs show around each change (View → Context Lines).
+enum DiffContext {
+    static let key = "diffContextLines"
+    static let standard = 3                 // git's default
+    static let wholeFile = -1               // the whole file, in one section
+    /// The menu's choices besides the whole file.
+    static let lineChoices = [3, 5, 10, 25]
+
+    /// The current setting.
+    static var current: Int {
+        UserDefaults.standard.object(forKey: key) as? Int ?? standard
     }
 }
 
@@ -217,7 +238,8 @@ extension Git {
 
     /// The commit's message and per-file diffs against its first parent (all files added for the
     /// root commit).
-    static func commitDetails(_ hash: String, in root: URL) throws -> CommitDetails {
+    static func commitDetails(_ hash: String, in root: URL,
+                              context: Int = DiffContext.standard) throws -> CommitDetails {
         let info = try run(["show", "-s", "--no-color",
                             "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%b", hash], in: root)
         guard info.status == 0 else { throw GitError(message: "Commit \(hash) not found.") }
@@ -226,7 +248,7 @@ extension Git {
 
         let diffArgs = ["--format=", "--diff-merges=first-parent", "-M", "--no-color", "--no-ext-diff"]
         let names = try run(["show"] + diffArgs + ["--name-status", "-z", hash], in: root)
-        let patch = try run(["show"] + diffArgs + ["-p", hash], in: root)
+        let patch = try run(["show"] + diffArgs + ["-p", contextArgument(context), hash], in: root)
         let changes = parseNameStatus(names.text)
         let chunks = splitPatch(patch.text)
         // Both come from the same diff, in the same order; pair them up.

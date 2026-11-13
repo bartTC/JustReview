@@ -70,6 +70,7 @@ struct AppCommands: Commands {
     @AppStorage("diffMode") private var mode: DiffMode = .unified
     @AppStorage("wrapLines") private var wrapLines = true
     @AppStorage(RepoModel.showBlameKey) private var showBlame = false
+    @AppStorage(DiffContext.key) private var contextLines = DiffContext.standard
     @AppStorage("annotationsCollapsed") private var annotationsCollapsed = false
 
     /// Switches the sidebar to a tab (⌃⌘1/2/3); a checkmark shows the current one.
@@ -119,6 +120,11 @@ struct AppCommands: Commands {
                 .keyboardShortcut("z", modifiers: .option)
             Toggle("Show Blame", isOn: $showBlame)
                 .keyboardShortcut("b", modifiers: [.option, .command])
+            Picker("Context Lines", selection: $contextLines) {
+                ForEach(DiffContext.lineChoices, id: \.self) { Text("\($0) Lines").tag($0) }
+                Divider()
+                Text("Whole File").tag(DiffContext.wholeFile)
+            }
             Divider()
             sidebarTabButton(.changes, key: "1")
             sidebarTabButton(.files, key: "2")

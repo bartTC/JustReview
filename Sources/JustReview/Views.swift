@@ -455,6 +455,7 @@ struct DiffDetailView: View {
     @AppStorage("syntaxHighlighting") private var syntaxHighlighting = true
     @AppStorage("wrapLines") private var wrapLines = true
     @AppStorage(RepoModel.showBlameKey) private var showBlame = false
+    @AppStorage(DiffContext.key) private var contextLines = DiffContext.standard
     @AppStorage(ThemePrefs.lightKey) private var lightTheme = ThemeStore.defaultLight
     @AppStorage(ThemePrefs.darkKey) private var darkTheme = ThemeStore.defaultDark
     @Environment(\.colorScheme) private var colorScheme
@@ -479,6 +480,7 @@ struct DiffDetailView: View {
             .onChange(of: darkTheme) { model.reloadDiff() }
             .onChange(of: colorScheme) { model.reloadDiff() }
             .onChange(of: showBlame) { model.loadBlame() }
+            .onChange(of: contextLines) { model.reloadDiff() }
     }
 
     @ViewBuilder

@@ -13,7 +13,8 @@ macOS 15 or later on Apple Silicon.
 ## Features
 
 - **Everything that changed:** staged, unstaged and untracked files, shown as a tree.
-- **Stacked or side-by-side diffs** with changed words highlighted and optional line wrapping.
+- **Stacked or side-by-side diffs** with changed words highlighted and optional line wrapping,
+  just the changed parts or the whole file.
 - **Annotations for your LLM:** double-click any line, or a file's name, to leave a note.
   Drag across several lines to mark them: double-click leaves one note for all of them
   (`path:12-18`), ⌘C copies their code without line numbers.

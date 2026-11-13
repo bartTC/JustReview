@@ -323,6 +323,7 @@ final class RepoModel: ObservableObject {
         let previous = rendered
         let tabWidth = FontPrefs.currentTabWidth
         let syntaxEnabled = UserDefaults.standard.object(forKey: "syntaxHighlighting") as? Bool ?? true
+        let context = DiffContext.current
         // Theme for the current appearance; scopes styled by either theme are kept when
         // highlighting (so switching appearance only needs a re-render).
         let isDark = ThemePrefs.systemIsDark
@@ -331,14 +332,14 @@ final class RepoModel: ObservableObject {
             .union(ThemeStore.shared.theme(named: ThemePrefs.name(dark: true)).syntaxScopes)
         Task {
             let result = await Task.detached { () -> RenderedDiff? in
-                let raw = (try? Git.diff(for: change, in: root)) ?? ""
+                let raw = (try? Git.diff(for: change, in: root, context: context)) ?? ""
                 // Unchanged since last time: keep the current rows (cheap refresh-on-focus).
                 if previous?.changeID == change.id, previous?.rawText == raw,
                    previous?.tabWidth == tabWidth, previous?.syntaxEnabled == syntaxEnabled,
                    previous?.themeName == theme.name { return nil }
                 let syntax = syntaxEnabled ? Self.syntax(for: change, in: root, styledScopes: styledScopes) : .none
                 return DiffRenderer.render(raw, changeID: change.id, tabWidth: tabWidth,
-                                           showHunkHeaders: !change.isUnchanged,
+                                           showHunkHeaders: !change.isUnchanged && context != DiffContext.wholeFile,
                                            syntax: syntax, syntaxEnabled: syntaxEnabled,
                                            styler: ThemeStyler(theme: theme), dark: isDark)
             }.value
@@ -363,6 +364,7 @@ extension RepoModel {
         }
         let tabWidth = FontPrefs.currentTabWidth
         let syntaxEnabled = UserDefaults.standard.object(forKey: "syntaxHighlighting") as? Bool ?? true
+        let context = DiffContext.current
         let isDark = ThemePrefs.systemIsDark
         let theme = ThemeStore.shared.theme(named: ThemePrefs.name(dark: isDark))
         let styledScopes = ThemeStore.shared.theme(named: ThemePrefs.name(dark: false)).syntaxScopes
@@ -370,7 +372,7 @@ extension RepoModel {
         Task {
             let result = await Task.detached { () -> Result<RenderedCommit, Error> in
                 Result {
-                    let details = try Git.commitDetails(hash, in: root)
+                    let details = try Git.commitDetails(hash, in: root, context: context)
                     let parent = details.parents.first
                     let highlight = syntaxEnabled && details.files.count <= Self.highlightFileLimit
                     let files = details.files.map { file -> CommitFile in
@@ -383,7 +385,7 @@ extension RepoModel {
                             },
                             new: { change.status == "D" ? nil : Git.show(change.path, at: hash, in: root) })
                         let diff = DiffRenderer.render(file.patch, changeID: change.id, tabWidth: tabWidth,
-                                                       syntax: syntax, syntaxEnabled: highlight,
+                                                       showHunkHeaders: context != DiffContext.wholeFile, syntax: syntax, syntaxEnabled: highlight,
                                                        styler: ThemeStyler(theme: theme), dark: isDark)
                         return CommitFile(change: change, diff: diff)
                     }

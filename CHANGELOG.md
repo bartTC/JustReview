@@ -11,6 +11,8 @@ All notable changes to JustReview. The format follows
 - Show Blame (⌥⌘B): who last changed each line and when, in a column next to the line
   numbers, for every line that was already committed. Click a name to see its commit on the
   History tab.
+- Context Lines (View menu): 3, 5, 10 or 25 unchanged lines around each change, or the
+  whole file with the changes in it.
 - History tab: lists the commits; picking one shows its message and the changes of every file
   it touched, one after another (read-only, no annotations). Click a file's header to fold it.
 

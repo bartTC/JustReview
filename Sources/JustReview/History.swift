@@ -113,6 +113,7 @@ struct CommitDetailView: View {
     @AppStorage(FontPrefs.lineHeight) private var lineHeight = FontPrefs.defaultLineHeight
     @AppStorage("syntaxHighlighting") private var syntaxHighlighting = true
     @AppStorage("wrapLines") private var wrapLines = true
+    @AppStorage(DiffContext.key) private var contextLines = DiffContext.standard
     @AppStorage(ThemePrefs.lightKey) private var lightTheme = ThemeStore.defaultLight
     @AppStorage(ThemePrefs.darkKey) private var darkTheme = ThemeStore.defaultDark
     @Environment(\.colorScheme) private var colorScheme
@@ -133,6 +134,7 @@ struct CommitDetailView: View {
             .onChange(of: lightTheme) { model.reloadDiff() }
             .onChange(of: darkTheme) { model.reloadDiff() }
             .onChange(of: colorScheme) { model.reloadDiff() }
+            .onChange(of: contextLines) { model.reloadDiff() }
     }
 
     @ViewBuilder
