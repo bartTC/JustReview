@@ -140,8 +140,12 @@ struct FileListView: View {
         List(selection: listSelection) {
             FileTreeRows(nodes: tree, font: font, size: size, isExpanded: isExpanded)
         }
+        // A fresh list for changed files and for all files: changing one list's rows wholesale
+        // leaves stale rows (the old selection) drawn over others.
+        .id(showAll)
         // Reveal this tab's file when the tab/window becomes active or shows another file
-        // (and once the list has loaded, if the file wasn't listed yet).
+        // (and once the list has loaded, if the file wasn't listed yet, or after switching lists).
+        .onAppear { reveal(model.selection, in: tree, proxy: proxy) }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
             if (note.object as? NSWindow) === handle.window { reveal(model.selection, in: tree, proxy: proxy) }
         }
