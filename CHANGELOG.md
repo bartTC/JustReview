@@ -4,17 +4,17 @@ All notable changes to JustReview. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.1.0] - 2026-11-13
 
 ### Added
 
+- History tab: lists the commits; picking one shows its message and the changes of every file
+  it touched, one after another (read-only, no annotations). Click a file's header to fold it.
 - Show Blame (⌥⌘B): who last changed each line and when, in a column next to the line
   numbers, for every line that was already committed. Click a name to see its commit on the
   History tab.
 - Context Lines (View menu): 3, 5, 10 or 25 unchanged lines around each change, or the
   whole file with the changes in it.
-- History tab: lists the commits; picking one shows its message and the changes of every file
-  it touched, one after another (read-only, no annotations). Click a file's header to fold it.
 
 ### Changed
 
@@ -55,5 +55,5 @@ The first release.
 - Settings for fonts, line height, tab width, themes and app appearance.
 - Signed with a Developer ID and notarized by Apple.
 
-[Unreleased]: https://github.com/bartTC/JustReview/compare/v1.0.0...HEAD
+[1.1.0]: https://github.com/bartTC/JustReview/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/bartTC/JustReview/releases/tag/v1.0.0
