@@ -6,9 +6,7 @@ of your choice.
 **[Download the latest release](https://github.com/bartTC/JustReview/releases/latest)** for
 macOS 15 or later on Apple Silicon.
 
-![JustReview in light mode, stacked diff with annotations](docs/screenshot-light.png)
-
-![JustReview in dark mode, side-by-side diff with annotations](docs/screenshot-dark.png)
+![JustReview in dark mode, a diff with an annotation and the annotation editor open under a line](docs/screenshot-dark-editor.png)
 
 ## Features
 
