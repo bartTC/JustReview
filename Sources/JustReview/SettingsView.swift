@@ -3,7 +3,7 @@ import SwiftUI
 /// The settings window: a toolbar of panes (macOS HIG). Each pane is sized to its content, so
 /// nothing scrolls; the window title follows the pane and the last pane is reopened.
 struct SettingsView: View {
-    enum Pane: String { case general, fonts, themes }
+    enum Pane: String { case general, fonts, themes, annotations }
 
     @AppStorage("settingsPane") private var pane: Pane = .general
 
@@ -18,6 +18,9 @@ struct SettingsView: View {
             ThemeSettings()
                 .tabItem { Label("Themes", systemImage: "paintpalette") }
                 .tag(Pane.themes)
+            AnnotationSettings()
+                .tabItem { Label("Annotations", systemImage: "text.bubble") }
+                .tag(Pane.annotations)
         }
     }
 }
@@ -163,6 +166,84 @@ private struct ThemeSettings: View {
             }
             .help("Reload themes from disk")
         }
+    }
+}
+
+/// Instructions copied in front of the annotations, one text per repository. Opens on the
+/// repository whose window was last active.
+private struct AnnotationSettings: View {
+    @StateObject private var repository = Box<String?>(nil)
+    @StateObject private var repositories = Box<[String]>([])
+    @StateObject private var text = Box("")
+    @StateObject private var window = Box<NSWindow?>(nil)
+
+    var body: some View {
+        SettingsPane {
+            text.value = ""
+            save()
+        } content: {
+            if let selected = repository.value {
+                Section {
+                    Picker("Repository", selection: Binding(get: { selected }, set: { show($0) })) {
+                        ForEach(repositories.value, id: \.self) { path in
+                            Text((path as NSString).lastPathComponent).tag(path)
+                        }
+                    }
+                    .help(selected)
+                }
+                Section {
+                    TextEditor(text: Binding(get: { text.value }, set: { text.value = $0; save() }))
+                        .font(.body)
+                        .scrollContentBackground(.hidden)
+                        .frame(height: 110)
+                        .overlay(alignment: .topLeading) {
+                            if text.value.isEmpty {
+                                Text("Below are my changes. Apply them and commit automatically.")
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.leading, 5)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                } header: {
+                    Text("Instructions")
+                } footer: {
+                    Text("Put in front of the annotations when you copy them, followed by a blank line.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Section {
+                    Text("Open a repository to give its annotations instructions.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .background(WindowReader { window.value = $0 })
+        .onAppear(perform: reload)
+        // The settings window stays around when closed: pick up the active repository each
+        // time it comes back.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            if let key = note.object as? NSWindow, key === window.value { reload() }
+        }
+    }
+
+    private func reload() {
+        let router = WindowRouter.shared
+        let open = router.openRepositories
+        repositories.value = (open + CopyPreamble.repositories.filter { !open.contains($0) })
+            .sorted { ($0 as NSString).lastPathComponent.localizedStandardCompare(($1 as NSString).lastPathComponent) == .orderedAscending }
+        show(router.lastActiveRepository.flatMap { repositories.value.contains($0) ? $0 : nil }
+             ?? repository.value.flatMap { repositories.value.contains($0) ? $0 : nil }
+             ?? repositories.value.first)
+    }
+
+    private func show(_ path: String?) {
+        repository.value = path
+        text.value = path.map(CopyPreamble.raw(for:)) ?? ""
+    }
+
+    private func save() {
+        if let path = repository.value { CopyPreamble.set(text.value, for: path) }
     }
 }
 

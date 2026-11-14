@@ -280,8 +280,8 @@ extension RepoModel {
     private func confirmDiscardingDraft() -> Bool {
         guard let editing, hasUnsavedDraft else { return true }
         let alert = NSAlert()
-        alert.messageText = "Discard your unsaved note?"
-        alert.informativeText = "Your note on \(draft(path: editing.path, key: editing.key, endLine: editing.endLine, text: "").location) isn’t saved yet."
+        alert.messageText = "Discard your unsaved annotation?"
+        alert.informativeText = "Your annotation on \(draft(path: editing.path, key: editing.key, endLine: editing.endLine, text: "").location) isn’t saved yet."
         alert.addButton(withTitle: "Keep Editing")
         alert.addButton(withTitle: "Discard").hasDestructiveAction = true
         return alert.runModal() == .alertSecondButtonReturn
@@ -434,8 +434,11 @@ extension RepoModel {
         annotations.removeAll { $0.id == annotation.id }
     }
 
+    /// The notes as Markdown, after the repository's copy instructions (if any) and a blank line.
     var annotationsMarkdown: String {
-        annotations.map(\.markdown).joined(separator: "\n\n") + "\n"
+        let notes = annotations.map(\.markdown).joined(separator: "\n\n") + "\n"
+        let preamble = root.map { CopyPreamble.text(for: $0.path) } ?? ""
+        return preamble.isEmpty ? notes : preamble + "\n\n" + notes
     }
 
     /// Copies all annotations (Copy button or ⌘C) and flashes "Copied" on the button.
@@ -463,6 +466,41 @@ extension RepoModel {
 final class Box<T>: ObservableObject {
     @Published var value: T
     init(_ value: T) { self.value = value }
+}
+
+// MARK: - Copy instructions
+
+/// Text put in front of the annotations when they're copied, e.g. instructions for the LLM.
+/// Set in Settings, one per repository; kept in the app's preferences like the annotations.
+enum CopyPreamble {
+    private static let prefix = "copyPreamble:"
+
+    private static func key(_ root: String) -> String { prefix + root }
+
+    /// The repository's text, trimmed; empty when there is none.
+    static func text(for root: String) -> String {
+        (UserDefaults.standard.string(forKey: key(root)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The text as typed (Settings edits this).
+    static func raw(for root: String) -> String {
+        UserDefaults.standard.string(forKey: key(root)) ?? ""
+    }
+
+    static func set(_ text: String, for root: String) {
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            UserDefaults.standard.removeObject(forKey: key(root))
+        } else {
+            UserDefaults.standard.set(text, forKey: key(root))
+        }
+    }
+
+    /// Repositories that have instructions saved.
+    static var repositories: [String] {
+        UserDefaults.standard.dictionaryRepresentation().keys
+            .filter { $0.hasPrefix(prefix) }
+            .map { String($0.dropFirst(prefix.count)) }
+    }
 }
 
 // MARK: - Inline editor
@@ -636,7 +674,7 @@ struct InlineAnnotationEditor: View {
                     .overlay(alignment: .topLeading) {
                         if draft.text.isEmpty {
                             // The text view has no placeholder; lined up with its text.
-                            Text("Add a note…")
+                            Text("Add an annotation…")
                                 .font(Font(NoteTextView.font as CTFont))
                                 .foregroundStyle(.tertiary)
                                 .padding(.leading, NoteTextView.inset)

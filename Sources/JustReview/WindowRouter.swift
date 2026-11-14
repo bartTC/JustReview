@@ -31,6 +31,18 @@ final class WindowRouter {
     static let shared = WindowRouter()
 
     private var handles: [WindowHandle] = []
+    /// Repository of the repository window that was last active (Settings shows its settings).
+    private(set) var lastActiveRepository: String?
+
+    /// Repositories shown in windows, in the order they were opened.
+    var openRepositories: [String] {
+        var seen = Set<String>()
+        return handles.compactMap(\.path).filter { seen.insert($0).inserted }
+    }
+
+    func windowBecameKey(_ handle: WindowHandle) {
+        if let path = handle.path { lastActiveRepository = path }
+    }
     private var openWindow: OpenWindowAction?
     private var pending: [(URL, WindowHandle?)] = []
 
@@ -201,6 +213,11 @@ struct RepoWindow: View {
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didMoveNotification)) { saveFrame($0) }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResizeNotification)) { saveFrame($0) }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { saveFrame($0) }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+                if let window = note.object as? NSWindow, window === handle.window {
+                    WindowRouter.shared.windowBecameKey(handle)
+                }
+            }
             // Folders opened from outside (jrev → `open -a JustReview <dir>`, Finder, Dock) are
             // delivered to an existing window instead of spawning one; SwiftUI only creates a
             // window when none exists. The router then focuses/reuses/opens the right window.

@@ -1,6 +1,6 @@
 # JustReview
 
-A macOS app for reviewing the changes in a git repository and writing review notes for the LLM
+A macOS app for reviewing the changes in a git repository and writing review annotations for the LLM
 of your choice.
 
 **[Download the latest release](https://github.com/bartTC/JustReview/releases/latest)** for
@@ -15,20 +15,22 @@ macOS 15 or later on Apple Silicon.
 - **Everything that changed:** staged, unstaged and untracked files, shown as a tree.
 - **Stacked or side-by-side diffs** with changed words highlighted and optional line wrapping,
   just the changed parts or the whole file.
-- **Annotations for your LLM:** double-click any line, or a file's name, to leave a note — or
-  click a line and just start typing. The note is written right under the line and stays open
+- **Annotations for your LLM:** double-click any line, or a file's name, to add an annotation —
+  or click a line and just start typing. It's written right under the line and stays open
   until you save or cancel it.
-  Drag across several lines to mark them: typing or a double-click leaves one note for all of them
+  Drag across several lines to mark them: typing or a double-click adds one annotation for all of them
   (`path:12-18`), ⌘C copies their code without line numbers.
-  Copy all notes as Markdown with one click (or ⌘C) and paste them into the LLM of your choice:
+  Copy all annotations as Markdown with one click (or ⌘C) and paste them into the LLM of your choice:
 
   ```
   ## src/utils/permissions.ts:6 (+)
   Should this check the role first?
   ```
 
-  The LLM's changes show up automatically. When it changes an annotated line, that note is
-  dropped, so only the open points remain.
+  The LLM's changes show up automatically. When it changes an annotated line, that annotation is
+  dropped, so only the open points remain. Instructions you set for the repository (Settings →
+  Annotations) are copied in front of the annotations, e.g. "Apply them and commit
+  automatically."
 - **History:** browse the commits and read each one's changes, every file in one view.
 - **Blame:** who last changed each line and when; click a name to see that commit.
 - **Syntax highlighting** for Python, JavaScript, TypeScript, JSON, CSS, HTML, Bash, Go, Rust,
@@ -68,8 +70,8 @@ Choose **JustReview → Install Command Line Tool…** to get the `jrev` command
 | ⌥⌘A | Show or hide annotations |
 | ⌘C | Copy the marked lines' code, or else the annotations as Markdown |
 | ⇧⌘C | Copy annotations as Markdown |
-| Return | Save the note being written (⇧Return for a new line) |
-| Esc | Cancel the note being written, or unmark lines |
+| Return | Save the annotation being written (⇧Return for a new line) |
+| Esc | Cancel the annotation being written, or unmark lines |
 | ⌘R | Clear annotations |
 | ⌘O | Open a repository |
 | ⌥⌘O | Open the file in its default app |
