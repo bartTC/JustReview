@@ -542,7 +542,7 @@ struct DiffDetailView: View {
                 Text(change.path).fontWeight(.semibold)
             }
             .contentShape(Rectangle())
-            .onTapGesture(count: 2) { model.editing = target }
+            .onTapGesture(count: 2) { model.beginEditing(target) }
             .help("Double-click to annotate this file")
             .contextMenu { FileOpenMenuItems(root: model.root, path: change.path) }
             Text(change.statusDescription)
@@ -554,15 +554,12 @@ struct DiffDetailView: View {
                 Text("+\(d.added)").foregroundStyle(.green)
                 Text("−\(d.removed)").foregroundStyle(.red)
             }
-            Button { model.editing = target } label: {
+            Button { model.beginEditing(target) } label: {
                 Image(systemName: model.annotation(path: change.path, key: nil) == nil
                       ? "text.bubble" : "text.bubble.fill")
             }
             .buttonStyle(.borderless)
             .help("Annotate this file")
-            .popover(isPresented: model.editingBinding(target), arrowEdge: .bottom) {
-                AnnotationEditor(model: model, target: target)
-            }
         }
         .lineLimit(1)
         .truncationMode(.middle)
@@ -570,12 +567,16 @@ struct DiffDetailView: View {
         .padding(.vertical, 8)
     }
 
-    /// The note on the whole file, shown under the file header.
+    /// The note on the whole file (or its open editor), shown under the file header.
     @ViewBuilder
     private func fileNote(_ change: FileChange) -> some View {
-        if let note = model.annotation(path: change.path, key: nil) {
+        if let editing = model.editing, editing.path == change.path, editing.key == nil {
+            InlineAnnotationEditor(model: model, indent: 8)
+                .padding(.vertical, 2)
+            Divider()
+        } else if let note = model.annotation(path: change.path, key: nil) {
             AnnotationNoteView(annotation: note, indent: 8,
-                               onEdit: { model.editing = RepoModel.fileTarget(path: change.path) },
+                               onEdit: { model.beginEditing(RepoModel.fileTarget(path: change.path)) },
                                onDelete: { model.removeAnnotation(note) })
                 .padding(.vertical, 2)
             Divider()
@@ -640,8 +641,8 @@ struct DiffDetailView: View {
                 }
                 .defaultScrollAnchor(.topLeading)
                 .background {
-                    // Esc unmarks the marked lines.
-                    if model.mark != nil {
+                    // Esc unmarks the marked lines (an open editor's Cancel takes Esc first).
+                    if model.mark != nil && model.editing == nil {
                         Button("") { model.mark = nil }
                             .keyboardShortcut(.cancelAction)
                             .opacity(0)
@@ -984,11 +985,6 @@ private struct AnnotatableLine: ViewModifier {
                     }
                 }
             }
-            .popover(isPresented: model.editingBinding(target), arrowEdge: .bottom) {
-                let editing = model.editing ?? target
-                AnnotationEditor(model: model, target: editing)
-                    .id("\(editing.key?.line ?? 0)-\(editing.endLine ?? 0)")
-            }
     }
 }
 
@@ -1111,12 +1107,18 @@ struct UnifiedRowView: View {
                 .fixedSize(horizontal: false, vertical: true) // the blame cell takes the line's height
                 .modifier(BlameRunHighlight(hover: model.blameHover, run: blame?.run))
 
-                ForEach(annotatable ? model.notesEnding(path: path, key: key) : []) { note in
-                    AnnotationNoteView(annotation: note,
-                                       indent: (blameWidth ?? 0) + gutter * (singleNumber ? 1 : 2) + 24 + columnWidth,
-                                       onEdit: { model.editing = EditTarget(path: path, key: note.key, rowID: row.id,
-                                                                            column: 0, endLine: note.endLine) },
-                                       onDelete: { model.removeAnnotation(note) })
+                let indent = (blameWidth ?? 0) + gutter * (singleNumber ? 1 : 2) + 24 + columnWidth
+                ForEach(annotatable ? model.noteItems(path: path, key: key) : []) { item in
+                    switch item {
+                    case .editor:
+                        InlineAnnotationEditor(model: model, indent: indent)
+                    case .note(let note):
+                        AnnotationNoteView(annotation: note, indent: indent,
+                                           onEdit: { model.beginEditing(EditTarget(path: path, key: note.key,
+                                                                                   rowID: row.id, column: 0,
+                                                                                   endLine: note.endLine)) },
+                                           onDelete: { model.removeAnnotation(note) })
+                    }
                 }
             }
         }
@@ -1155,28 +1157,36 @@ struct SplitRowView: View {
         }
     }
 
-    /// Notes sit under the half they belong to; an unchanged line's note spans both.
+    /// Notes (and the open editor) sit under the half they belong to; an unchanged line's
+    /// span both.
     @ViewBuilder
     private var notes: some View {
-        let left = row.left.map { model.notesEnding(path: path, key: $0.key) } ?? []
-        let right = row.right.map { model.notesEnding(path: path, key: $0.key) } ?? []
+        let left = row.left.map { model.noteItems(path: path, key: $0.key) } ?? []
+        let right = row.right.map { model.noteItems(path: path, key: $0.key) } ?? []
         if !left.isEmpty, left == right {
-            ForEach(left) { note($0, column: 1) }
+            ForEach(left) { item($0, column: 1) }
         } else if !left.isEmpty || !right.isEmpty {
             HStack(alignment: .top, spacing: 0) {
-                VStack(spacing: 0) { ForEach(left) { note($0, column: 1) } }
+                VStack(spacing: 0) { ForEach(left) { item($0, column: 1) } }
                     .frame(maxWidth: .infinity)
-                VStack(spacing: 0) { ForEach(right) { note($0, column: 2) } }
+                VStack(spacing: 0) { ForEach(right) { item($0, column: 2) } }
                     .frame(maxWidth: .infinity)
             }
         }
     }
 
-    private func note(_ a: Annotation, column: Int) -> some View {
-        AnnotationNoteView(annotation: a, indent: gutter + 22 + columnWidth,
-                           onEdit: { model.editing = EditTarget(path: path, key: a.key, rowID: row.id,
-                                                                column: column, endLine: a.endLine) },
-                           onDelete: { model.removeAnnotation(a) })
+    @ViewBuilder
+    private func item(_ item: NoteItem, column: Int) -> some View {
+        let indent = gutter + 22 + columnWidth
+        switch item {
+        case .editor:
+            InlineAnnotationEditor(model: model, indent: indent)
+        case .note(let a):
+            AnnotationNoteView(annotation: a, indent: indent,
+                               onEdit: { model.beginEditing(EditTarget(path: path, key: a.key, rowID: row.id,
+                                                                       column: column, endLine: a.endLine)) },
+                               onDelete: { model.removeAnnotation(a) })
+        }
     }
 }
 

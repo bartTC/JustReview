@@ -48,20 +48,39 @@ struct Annotation: Identifiable, Codable, Hashable {
     var markdown: String { "## \(location)\n\(text)" }
 }
 
-/// Which line is being annotated, and in which column the popover should anchor
-/// (0 = stacked, 1 = left half, 2 = right half of side-by-side; -1 = the file header).
+/// Which line is being annotated, and in which column (0 = stacked, 1 = left half, 2 = right
+/// half of side-by-side; -1 = the file header).
 struct EditTarget: Equatable {
     let path: String
     let key: LineKey?
     let rowID: Int
     let column: Int
-    /// Last line of a range (marked lines); the popover then sits at that line's row (`rowID`).
+    /// Last line of a range (marked lines); `rowID` is then that line's row.
     var endLine: Int? = nil
 
-    /// Same row and column: where the popover is anchored.
+    /// Same row and column.
     func sameAnchor(_ other: EditTarget) -> Bool {
         path == other.path && rowID == other.rowID && column == other.column
     }
+
+    /// Same note: file, line(s) — wherever it's shown.
+    func sameNote(_ other: EditTarget) -> Bool {
+        path == other.path && key == other.key && endLine == other.endLine
+    }
+}
+
+/// Text of the open inline editor. Its own object so typing only redraws the editor, not every
+/// row observing the model.
+@MainActor
+final class EditorDraft: ObservableObject {
+    @Published var text = ""
+    /// Bumped to put the keyboard focus into the editor (when it opens, or is opened again).
+    @Published private(set) var focusRequest = 0
+    /// The last request the editor acted on: an editor recreated after scrolling back into view
+    /// doesn't grab the focus again.
+    var handledFocus = 0
+
+    func requestFocus() { focusRequest += 1 }
 }
 
 /// Lines marked by clicking or dragging: from the line where the mouse went down to `end`.
@@ -200,11 +219,92 @@ extension RepoModel {
     /// Annotates the marked lines when the line is one of them, otherwise just the line.
     func annotate(at target: EditTarget) {
         if isMarked(target), let marked = markedTarget {
-            editing = marked
+            beginEditing(marked)
         } else {
             mark = LineMark(anchor: target, end: target)
-            editing = target
+            beginEditing(target)
         }
+    }
+
+    // MARK: Inline editor
+
+    /// Opens the inline editor for a note (new or existing) and puts the focus in it. Only one
+    /// is open at a time: unsaved text in another one is discarded only after asking.
+    func beginEditing(_ target: EditTarget) {
+        if let editing, editing.sameNote(target) {
+            editorDraft.requestFocus()
+            return
+        }
+        guard confirmDiscardingDraft() else { return }
+        editorDraft.text = annotation(path: target.path, key: target.key, endLine: target.endLine)?.text ?? ""
+        editorDraft.requestFocus()
+        editing = target
+    }
+
+    func saveEditing() {
+        guard let editing else { return }
+        setAnnotation(path: editing.path, key: editing.key, endLine: editing.endLine, text: editorDraft.text)
+        endEditing()
+    }
+
+    func deleteEditing() {
+        guard let editing else { return }
+        setAnnotation(path: editing.path, key: editing.key, endLine: editing.endLine, text: "")
+        endEditing()
+    }
+
+    /// Typing with lines marked (and no text field focused) annotates them: their editor opens
+    /// with the typed text, so there's no need to double-click. Keys typed before the editor has
+    /// the focus go into it too. False when there's nothing to annotate.
+    func typeIntoMarkedLines(_ text: String) -> Bool {
+        guard let target = markedTarget, target.path == selection else { return false }
+        beginEditing(target)
+        guard let editing, editing.sameNote(target) else { return false } // kept another note
+        editorDraft.text += text
+        return true
+    }
+
+    /// Closes the editor (Cancel, Esc) without saving.
+    func endEditing() {
+        editing = nil
+    }
+
+    /// The open editor holds text that isn't saved.
+    private var hasUnsavedDraft: Bool {
+        guard let editing else { return false }
+        let saved = annotation(path: editing.path, key: editing.key, endLine: editing.endLine)?.text ?? ""
+        return editorDraft.text.trimmingCharacters(in: .whitespacesAndNewlines) != saved
+    }
+
+    /// True when there's no unsaved text in the open editor, or the user agreed to discard it.
+    private func confirmDiscardingDraft() -> Bool {
+        guard let editing, hasUnsavedDraft else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Discard your unsaved note?"
+        alert.informativeText = "Your note on \(draft(path: editing.path, key: editing.key, endLine: editing.endLine, text: "").location) isn’t saved yet."
+        alert.addButton(withTitle: "Keep Editing")
+        alert.addButton(withTitle: "Discard").hasDestructiveAction = true
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
+    /// The note being edited is shown under this line (so its editor goes there).
+    func editorEnds(path: String, key: LineKey) -> Bool {
+        guard let editing, editing.path == path, editing.key != nil else { return false }
+        return Annotation(path: path, key: editing.key, text: "", endLine: editing.endLine).ends(at: key)
+    }
+
+    /// The note's editor is open (shown in place of the note).
+    func isEditing(_ note: Annotation) -> Bool {
+        guard let editing else { return false }
+        return editing.path == note.path && editing.key == note.key && editing.endLine == note.endLine
+    }
+
+    /// What goes under a line: its notes, with the open editor in place of the note it edits, or
+    /// after them for a new note.
+    func noteItems(path: String, key: LineKey) -> [NoteItem] {
+        var items = notesEnding(path: path, key: key).map { isEditing($0) ? NoteItem.editor : .note($0) }
+        if editorEnds(path: path, key: key), !items.contains(.editor) { items.append(.editor) }
+        return items
     }
 
     /// A new note as it would be saved: the line's text, or for a range every line's text and
@@ -356,14 +456,6 @@ extension RepoModel {
         selection = annotation.path
         scrollRequest = ScrollRequest(path: annotation.path, key: annotation.key)
     }
-
-    /// Popover shown at this row/column while it (or a range ending there) is being annotated.
-    func editingBinding(_ target: EditTarget) -> Binding<Bool> {
-        Binding(
-            get: { self.editing?.sameAnchor(target) ?? false },
-            set: { if !$0, self.editing?.sameAnchor(target) == true { self.editing = nil } }
-        )
-    }
 }
 
 /// Local view state. (`@State` is a macro in this SDK whose plugin ships only with full Xcode,
@@ -373,29 +465,91 @@ final class Box<T>: ObservableObject {
     init(_ value: T) { self.value = value }
 }
 
-// MARK: - Popover editor
+// MARK: - Inline editor
 
-/// Puts the keyboard focus into the popover's text editor as soon as the popover is on screen.
-/// (`@FocusState` set in `onAppear` is often lost: the popover's window isn't key yet.)
-private struct FocusTextViewOnAppear: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView { Probe() }
-    func updateNSView(_ nsView: NSView, context: Context) {}
+/// Starts a note on the marked lines when typing (see `RepoModel.typeIntoMarkedLines`).
+private struct TypeToAnnotate: ViewModifier {
+    @ObservedObject var model: RepoModel
+    @ObservedObject var handle: WindowHandle
+    @StateObject private var monitor = Box<Any?>(nil)
 
-    final class Probe: NSView {
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            guard window != nil else { return }
-            // Now and once the popover has finished animating in: focusing during the animation
-            // leaves the caret undrawn until the first keystroke.
-            for delay in [0.0, 0.2] {
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.focus() }
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                guard monitor.value == nil else { return }
+                monitor.value = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                    // Local monitors run on the main thread.
+                    MainActor.assumeIsolated { perform(event) } ? nil : event
+                }
             }
-        }
+            .onDisappear {
+                if let token = monitor.value { NSEvent.removeMonitor(token) }
+                monitor.value = nil
+            }
+    }
 
-        private func focus() {
+    /// True when the key went into a note.
+    @MainActor
+    private func perform(_ event: NSEvent) -> Bool {
+        guard let window = event.window, window === handle.window, model.mark != nil,
+              !(window.firstResponder is NSText), // typing in a text field or the editor
+              event.modifierFlags.intersection([.command, .control]).isEmpty,
+              let text = event.characters, !text.isEmpty,
+              // Printable only: no Return, Tab, Esc, Delete, arrows or function keys.
+              text.unicodeScalars.allSatisfy({ !$0.properties.generalCategory.isControlOrPrivate })
+        else { return false }
+        return model.typeIntoMarkedLines(text)
+    }
+}
+
+extension Unicode.GeneralCategory {
+    /// Control characters, and the private-use range AppKit reports arrow and function keys in.
+    fileprivate var isControlOrPrivate: Bool {
+        self == .control || self == .privateUse || self == .format
+    }
+}
+
+extension View {
+    func typeToAnnotate(model: RepoModel, handle: WindowHandle) -> some View {
+        modifier(TypeToAnnotate(model: model, handle: handle))
+    }
+}
+
+/// A note or the open editor, as listed under a line.
+enum NoteItem: Identifiable, Equatable {
+    case note(Annotation)
+    case editor
+
+    var id: String {
+        switch self {
+        case .note(let note): note.id.uuidString
+        case .editor: "editor"
+        }
+    }
+}
+
+/// Puts the keyboard focus into the editor's text view and scrolls the editor into view, once
+/// per focus request. (`@FocusState` set in `onAppear` is often lost in a lazily built row.)
+private struct EditorFocus: NSViewRepresentable {
+    let draft: EditorDraft
+    let request: Int
+
+    func makeNSView(context: Context) -> Probe { Probe() }
+
+    func updateNSView(_ probe: Probe, context: Context) {
+        guard request != draft.handledFocus else { return }
+        draft.handledFocus = request
+        // Now and once layout has settled (the row just grew to make room for the editor).
+        for delay in [0.0, 0.15] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak probe] in probe?.focus() }
+        }
+    }
+
+    /// Sits behind the editor, so its frame is the editor's.
+    final class Probe: NSView {
+        func focus() {
             guard let window, let content = window.contentView,
-                  let textView = Self.firstTextView(in: content) else { return }
-            window.makeKey()
+                  let textView = textView(in: content, within: convert(bounds, to: nil)) else { return }
             if window.firstResponder !== textView {
                 window.makeFirstResponder(textView)
                 // Caret at the end of an existing note.
@@ -403,63 +557,80 @@ private struct FocusTextViewOnAppear: NSViewRepresentable {
             }
             textView.updateInsertionPointStateAndRestartTimer(true)
             textView.needsDisplay = true
+            scrollToVisible(bounds.insetBy(dx: 0, dy: -8))
         }
 
-        private static func firstTextView(in view: NSView) -> NSTextView? {
-            if let textView = view as? NSTextView, textView.isEditable { return textView }
-            for sub in view.subviews { if let found = firstTextView(in: sub) { return found } }
+        /// The editable text view inside this editor's frame (other editors' are elsewhere).
+        private func textView(in view: NSView, within rect: NSRect) -> NSTextView? {
+            if let textView = view as? NSTextView, textView.isEditable,
+               rect.intersects(textView.convert(textView.bounds, to: nil)) { return textView }
+            for sub in view.subviews { if let found = textView(in: sub, within: rect) { return found } }
             return nil
         }
     }
 }
 
-struct AnnotationEditor: View {
+/// The note editor, opened under the annotated line(s) (or the file header). It stays open
+/// until saved, cancelled or deleted; the text is kept in the model, so scrolling away or
+/// switching files doesn't lose it.
+struct InlineAnnotationEditor: View {
     @ObservedObject var model: RepoModel
-    let target: EditTarget
-    @StateObject private var text = Box("")
-    @FocusState private var focused: Bool
+    @ObservedObject var draft: EditorDraft
+    let indent: CGFloat
 
-    private var existing: Annotation? { model.annotation(path: target.path, key: target.key, endLine: target.endLine) }
+    init(model: RepoModel, indent: CGFloat) {
+        self.model = model
+        self.draft = model.editorDraft
+        self.indent = indent
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(existing?.location ?? model.draft(path: target.path, key: target.key,
-                                                  endLine: target.endLine, text: "").location)
-                .font(.callout.monospaced())
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.head)
-            TextEditor(text: $text.value)
-                .font(.body)
-                .focused($focused)
-                .scrollContentBackground(.hidden)
-                .padding(4)
-                .frame(width: 360, height: 110)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(nsColor: .separatorColor)))
-                .background(FocusTextViewOnAppear())
-            HStack {
-                if existing != nil {
-                    Button("Delete", role: .destructive) {
-                        model.setAnnotation(path: target.path, key: target.key, endLine: target.endLine, text: "")
-                        model.editing = nil
+        if let target = model.editing {
+            let existing = model.annotation(path: target.path, key: target.key, endLine: target.endLine)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: "text.bubble.fill")
+                        .foregroundStyle(.orange)
+                    Text(existing?.location ?? model.draft(path: target.path, key: target.key,
+                                                          endLine: target.endLine, text: "").location)
+                        .font(.callout.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+                TextEditor(text: $draft.text)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .padding(4)
+                    .frame(height: 96)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(Color(nsColor: .textBackgroundColor)))
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor)))
+                HStack {
+                    if existing != nil {
+                        Button("Delete", role: .destructive) { model.deleteEditing() }
                     }
+                    Spacer()
+                    Button("Cancel") { model.endEditing() }
+                        .keyboardShortcut(.cancelAction)
+                        .help("Esc")
+                    Button("Save") { model.saveEditing() }
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .help("⌘↩")
                 }
-                Spacer()
-                Button("Cancel") { model.editing = nil }
-                    .keyboardShortcut(.cancelAction)
-                Button("Save") {
-                    model.setAnnotation(path: target.path, key: target.key, endLine: target.endLine, text: text.value)
-                    model.editing = nil
-                }
-                .keyboardShortcut(.return, modifiers: .command)
-                .help("⌘↩")
+                .controlSize(.small)
             }
-        }
-        .padding(12)
-        .onAppear {
-            text.value = existing?.text ?? ""
-            focused = true
+            .font(.body)
+            .foregroundStyle(.primary) // not the syntax theme's text color
+            .padding(8)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.12)))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.orange.opacity(0.5)))
+            .background(EditorFocus(draft: draft, request: draft.focusRequest))
+            // Not as wide as long unwrapped lines: the buttons stay in view.
+            .frame(maxWidth: 640, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, indent)
+            .padding(.trailing, 8)
+            .padding(.vertical, 3)
         }
     }
 }
@@ -607,7 +778,7 @@ struct AnnotationsPane: View {
     @ViewBuilder
     private var content: some View {
             if model.annotations.isEmpty {
-                Text("Double-click a line in the diff to annotate it.")
+                Text("Double-click a line in the diff, or click it and start typing, to annotate it.")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {

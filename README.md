@@ -15,8 +15,10 @@ macOS 15 or later on Apple Silicon.
 - **Everything that changed:** staged, unstaged and untracked files, shown as a tree.
 - **Stacked or side-by-side diffs** with changed words highlighted and optional line wrapping,
   just the changed parts or the whole file.
-- **Annotations for your LLM:** double-click any line, or a file's name, to leave a note.
-  Drag across several lines to mark them: double-click leaves one note for all of them
+- **Annotations for your LLM:** double-click any line, or a file's name, to leave a note — or
+  click a line and just start typing. The note is written right under the line and stays open
+  until you save or cancel it.
+  Drag across several lines to mark them: typing or a double-click leaves one note for all of them
   (`path:12-18`), ⌘C copies their code without line numbers.
   Copy all notes as Markdown with one click (or ⌘C) and paste them into the LLM of your choice:
 
@@ -66,7 +68,8 @@ Choose **JustReview → Install Command Line Tool…** to get the `jrev` command
 | ⌥⌘A | Show or hide annotations |
 | ⌘C | Copy the marked lines' code, or else the annotations as Markdown |
 | ⇧⌘C | Copy annotations as Markdown |
-| Esc | Unmark lines |
+| ⌘↩ | Save the note being written |
+| Esc | Cancel the note being written, or unmark lines |
 | ⌘R | Clear annotations |
 | ⌘O | Open a repository |
 | ⌥⌘O | Open the file in its default app |

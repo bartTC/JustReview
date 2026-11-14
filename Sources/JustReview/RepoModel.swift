@@ -78,8 +78,10 @@ final class RepoModel: ObservableObject {
     private var blameCache: [String: [Int: BlameLine]] = [:]
     private var blameGeneration = 0
     @Published var error: String?
-    /// The line (or range) whose annotation popover is open.
+    /// The note (line, range or file) whose inline editor is open; one at a time.
     @Published var editing: EditTarget?
+    /// The open editor's text.
+    let editorDraft = EditorDraft()
     /// Lines marked by clicking or dragging (to annotate together or copy).
     @Published var mark: LineMark?
     /// Frames of the line rows currently on screen, for finding the line under a drag.
@@ -210,6 +212,8 @@ final class RepoModel: ObservableObject {
             error = nil
             backForward = []
             backForwardIndex = -1
+            editing = nil
+            mark = nil
             changes = []
             rendered = nil
             didInitialSelection = false
