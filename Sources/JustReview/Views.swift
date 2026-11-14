@@ -571,7 +571,7 @@ struct DiffDetailView: View {
     @ViewBuilder
     private func fileNote(_ change: FileChange) -> some View {
         if let editing = model.editing, editing.path == change.path, editing.key == nil {
-            InlineAnnotationEditor(model: model, indent: 8)
+            InlineAnnotationEditor(model: model, indent: 12) // under the file name
                 .padding(.vertical, 2)
             Divider()
         } else if let note = model.annotation(path: change.path, key: nil) {
@@ -757,6 +757,10 @@ struct DiffDetailView: View {
 }
 
 // MARK: - Rows
+
+/// Where the widest line number starts in its column, which is the digits plus 12 wide with the
+/// numbers right-aligned 4 in from its right edge: the note editor lines up with it.
+private let lineNumberInset: CGFloat = 12
 
 /// The break between two sections of a diff: a gap, then a band with "⋯" under the line
 /// numbers and the enclosing function lined up with the code.
@@ -1013,6 +1017,30 @@ private struct RangeMarker: View {
     }
 }
 
+/// The blame column's tint and the divider on its right.
+private struct BlameColumnGround: View {
+    var body: some View {
+        Color.secondary.opacity(0.05)
+            .overlay(alignment: .trailing) {
+                Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1)
+            }
+    }
+}
+
+extension View {
+    /// Places a line's notes (or the note editor) next to the blame column, continuing the
+    /// column alongside them so it isn't interrupted.
+    @ViewBuilder
+    fileprivate func besideBlameColumn(_ width: CGFloat?) -> some View {
+        if let width {
+            padding(.leading, width)
+                .background(alignment: .leading) { BlameColumnGround().frame(width: width) }
+        } else {
+            self
+        }
+    }
+}
+
 /// The blame column of one line: author and age at the first line of each run of lines from
 /// the same commit. Click to see the commit on the History tab.
 private struct BlameCellView: View {
@@ -1043,12 +1071,9 @@ private struct BlameCellView: View {
         .padding(.vertical, linePadding)
         .frame(width: width, alignment: .topLeading)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color.secondary.opacity(0.05))
+        .background(BlameColumnGround())
         .overlay(alignment: .top) {
             if cell?.followsRun == true { Rectangle().fill(Color.secondary.opacity(0.2)).frame(height: 1) }
-        }
-        .overlay(alignment: .trailing) {
-            Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1)
         }
         .contentShape(Rectangle())
         .onHover { model.blameHover.hover(cell?.run, inside: $0) }
@@ -1107,18 +1132,21 @@ struct UnifiedRowView: View {
                 .fixedSize(horizontal: false, vertical: true) // the blame cell takes the line's height
                 .modifier(BlameRunHighlight(hover: model.blameHover, run: blame?.run))
 
-                let indent = (blameWidth ?? 0) + gutter * (singleNumber ? 1 : 2) + 24 + columnWidth
+                let indent = gutter * (singleNumber ? 1 : 2) + 24 + columnWidth
                 ForEach(annotatable ? model.noteItems(path: path, key: key) : []) { item in
-                    switch item {
-                    case .editor:
-                        InlineAnnotationEditor(model: model, indent: indent)
-                    case .note(let note):
-                        AnnotationNoteView(annotation: note, indent: indent,
-                                           onEdit: { model.beginEditing(EditTarget(path: path, key: note.key,
-                                                                                   rowID: row.id, column: 0,
-                                                                                   endLine: note.endLine)) },
-                                           onDelete: { model.removeAnnotation(note) })
+                    Group {
+                        switch item {
+                        case .editor:
+                            InlineAnnotationEditor(model: model, indent: lineNumberInset)
+                        case .note(let note):
+                            AnnotationNoteView(annotation: note, indent: indent,
+                                               onEdit: { model.beginEditing(EditTarget(path: path, key: note.key,
+                                                                                       rowID: row.id, column: 0,
+                                                                                       endLine: note.endLine)) },
+                                               onDelete: { model.removeAnnotation(note) })
+                        }
                     }
+                    .besideBlameColumn(blameWidth)
                 }
             }
         }
@@ -1152,7 +1180,7 @@ struct SplitRowView: View {
                 .fixedSize(horizontal: false, vertical: true) // both halves take the taller height
                 .modifier(BlameRunHighlight(hover: model.blameHover, run: blame?.run))
 
-                if annotatable { notes.padding(.leading, blameWidth ?? 0) }
+                if annotatable { notes.besideBlameColumn(blameWidth) }
             }
         }
     }
@@ -1180,7 +1208,7 @@ struct SplitRowView: View {
         let indent = gutter + 22 + columnWidth
         switch item {
         case .editor:
-            InlineAnnotationEditor(model: model, indent: indent)
+            InlineAnnotationEditor(model: model, indent: lineNumberInset)
         case .note(let a):
             AnnotationNoteView(annotation: a, indent: indent,
                                onEdit: { model.beginEditing(EditTarget(path: path, key: a.key, rowID: row.id,

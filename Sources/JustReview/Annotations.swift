@@ -528,44 +528,88 @@ enum NoteItem: Identifiable, Equatable {
     }
 }
 
-/// Puts the keyboard focus into the editor's text view and scrolls the editor into view, once
-/// per focus request. (`@FocusState` set in `onAppear` is often lost in a lazily built row.)
-private struct EditorFocus: NSViewRepresentable {
-    let draft: EditorDraft
-    let request: Int
+/// The editor's text view: grows with its text (three lines at least), Return saves, ⇧Return
+/// starts a new line, and it takes the focus once per request of the draft. (SwiftUI's
+/// TextEditor neither sizes itself to its text nor lets Return do anything but break the line.)
+private struct NoteTextView: NSViewRepresentable {
+    @ObservedObject var draft: EditorDraft
+    let onSave: () -> Void
 
-    func makeNSView(context: Context) -> Probe { Probe() }
+    static let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+    /// The text sits this far in from the left edge (the text container's line fragment padding).
+    static let inset: CGFloat = 5
+    private static let minLines: CGFloat = 3
 
-    func updateNSView(_ probe: Probe, context: Context) {
-        guard request != draft.handledFocus else { return }
-        draft.handledFocus = request
-        // Now and once layout has settled (the row just grew to make room for the editor).
-        for delay in [0.0, 0.15] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak probe] in probe?.focus() }
+    func makeNSView(context: Context) -> NSTextView {
+        let textView = NSTextView()
+        textView.font = Self.font
+        textView.textColor = .textColor
+        textView.drawsBackground = false
+        textView.isRichText = false
+        textView.allowsUndo = true
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.textContainerInset = .zero
+        textView.textContainer?.lineFragmentPadding = Self.inset
+        textView.textContainer?.widthTracksTextView = true
+        textView.string = draft.text
+        textView.delegate = context.coordinator
+        return textView
+    }
+
+    func updateNSView(_ textView: NSTextView, context: Context) {
+        context.coordinator.parent = self
+        if textView.string != draft.text { textView.string = draft.text }
+        guard draft.focusRequest != draft.handledFocus else { return }
+        draft.handledFocus = draft.focusRequest
+        DispatchQueue.main.async { [weak textView] in
+            guard let textView, let window = textView.window else { return }
+            if window.firstResponder !== textView {
+                window.makeFirstResponder(textView)
+                // Caret at the end (of an existing note, or of what was typed to open it).
+                textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
+            }
+            textView.scrollToVisible(textView.bounds.insetBy(dx: 0, dy: -40)) // and the buttons below
         }
     }
 
-    /// Sits behind the editor, so its frame is the editor's.
-    final class Probe: NSView {
-        func focus() {
-            guard let window, let content = window.contentView,
-                  let textView = textView(in: content, within: convert(bounds, to: nil)) else { return }
-            if window.firstResponder !== textView {
-                window.makeFirstResponder(textView)
-                // Caret at the end of an existing note.
-                textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
-            }
-            textView.updateInsertionPointStateAndRestartTimer(true)
-            textView.needsDisplay = true
-            scrollToVisible(bounds.insetBy(dx: 0, dy: -8))
+    /// As tall as its text, at the width offered.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView textView: NSTextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? 400
+        let minHeight = Self.minLines * (textView.layoutManager?.defaultLineHeight(for: Self.font) ?? 16)
+        guard let container = textView.textContainer, let layout = textView.layoutManager else {
+            return CGSize(width: width, height: minHeight)
+        }
+        container.size = NSSize(width: width, height: .greatestFiniteMagnitude)
+        layout.ensureLayout(for: container)
+        // The used rect leaves out the empty line after a trailing newline; the extra fragment has it.
+        let used = layout.usedRect(for: container).union(layout.extraLineFragmentRect)
+        return CGSize(width: width, height: max(minHeight, ceil(used.maxY)))
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    @MainActor
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: NoteTextView
+        init(parent: NoteTextView) { self.parent = parent }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.draft.text = textView.string
         }
 
-        /// The editable text view inside this editor's frame (other editors' are elsewhere).
-        private func textView(in view: NSView, within rect: NSRect) -> NSTextView? {
-            if let textView = view as? NSTextView, textView.isEditable,
-               rect.intersects(textView.convert(textView.bounds, to: nil)) { return textView }
-            for sub in view.subviews { if let found = textView(in: sub, within: rect) { return found } }
-            return nil
+        /// Return saves; ⇧Return (and ⌥Return) break the line. Not called while an input method
+        /// is composing: Return then confirms the composed text.
+        func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            guard selector == #selector(NSResponder.insertNewline(_:))
+                    || selector == #selector(NSResponder.insertLineBreak(_:)) else { return false }
+            if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
+                textView.insertNewlineIgnoringFieldEditor(nil) // a plain "\n", not a line separator
+            } else {
+                parent.onSave()
+            }
+            return true
         }
     }
 }
@@ -588,50 +632,61 @@ struct InlineAnnotationEditor: View {
         if let target = model.editing {
             let existing = model.annotation(path: target.path, key: target.key, endLine: target.endLine)
             VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: "text.bubble.fill")
-                        .foregroundStyle(.orange)
-                    Text(existing?.location ?? model.draft(path: target.path, key: target.key,
-                                                          endLine: target.endLine, text: "").location)
-                        .font(.callout.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                }
-                TextEditor(text: $draft.text)
-                    .font(.body)
-                    .scrollContentBackground(.hidden)
-                    .padding(4)
-                    .frame(height: 96)
-                    .background(RoundedRectangle(cornerRadius: 5).fill(Color(nsColor: .textBackgroundColor)))
-                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color(nsColor: .separatorColor)))
-                HStack {
-                    if existing != nil {
-                        Button("Delete", role: .destructive) { model.deleteEditing() }
+                NoteTextView(draft: draft, onSave: { model.saveEditing() })
+                    .overlay(alignment: .topLeading) {
+                        if draft.text.isEmpty {
+                            // The text view has no placeholder; lined up with its text.
+                            Text("Add a note…")
+                                .font(Font(NoteTextView.font as CTFont))
+                                .foregroundStyle(.tertiary)
+                                .padding(.leading, NoteTextView.inset)
+                                .allowsHitTesting(false)
+                        }
                     }
-                    Spacer()
+                HStack(spacing: 8) {
+                    Button("Save") { model.saveEditing() }
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .help("Return (⇧Return for a new line)")
                     Button("Cancel") { model.endEditing() }
                         .keyboardShortcut(.cancelAction)
                         .help("Esc")
-                    Button("Save") { model.saveEditing() }
-                        .keyboardShortcut(.return, modifiers: .command)
-                        .help("⌘↩")
+                    if existing != nil {
+                        Button("Delete", role: .destructive) { model.deleteEditing() }
+                            .padding(.leading, 8)
+                    }
                 }
                 .controlSize(.small)
             }
             .font(.body)
             .foregroundStyle(.primary) // not the syntax theme's text color
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.12)))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.orange.opacity(0.5)))
-            .background(EditorFocus(draft: draft, request: draft.focusRequest))
             // Not as wide as long unwrapped lines: the buttons stay in view.
             .frame(maxWidth: 640, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, indent)
-            .padding(.trailing, 8)
-            .padding(.vertical, 3)
+            .padding(.trailing, 12)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(UnfoldedPanel())
         }
+    }
+}
+
+/// The editor's ground: the diff opened up between two lines — a slightly darker band, edge to
+/// edge, with a soft inset shadow under the line above and a fainter one over the line below.
+private struct UnfoldedPanel: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        // Darker than the code in both appearances (a dark background needs more to show it).
+        Color.black.opacity(colorScheme == .dark ? 0.2 : 0.045)
+            .overlay(alignment: .top) {
+                LinearGradient(colors: [.black.opacity(0.14), .black.opacity(0)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 6)
+            }
+            .overlay(alignment: .bottom) {
+                LinearGradient(colors: [.black.opacity(0), .black.opacity(0.07)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 4)
+            }
+            .allowsHitTesting(false)
     }
 }
 

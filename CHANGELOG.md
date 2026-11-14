@@ -19,7 +19,8 @@ All notable changes to JustReview. The format follows
 - Notes are written in an editor that opens right under the line instead of a popover. It
   stays open until you save or cancel, even when you click elsewhere, scroll away or look at
   another file; one note is edited at a time, and opening another asks before discarding
-  unsaved text.
+  unsaved text. Return saves the note, ⇧Return starts a new line; the text box grows as you
+  write.
 - Typing with lines marked starts a note on them; no need to double-click.
 
 ## [1.1.0] - 2026-11-13

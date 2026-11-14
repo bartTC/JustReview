@@ -68,7 +68,7 @@ Choose **JustReview → Install Command Line Tool…** to get the `jrev` command
 | ⌥⌘A | Show or hide annotations |
 | ⌘C | Copy the marked lines' code, or else the annotations as Markdown |
 | ⇧⌘C | Copy annotations as Markdown |
-| ⌘↩ | Save the note being written |
+| Return | Save the note being written (⇧Return for a new line) |
 | Esc | Cancel the note being written, or unmark lines |
 | ⌘R | Clear annotations |
 | ⌘O | Open a repository |
