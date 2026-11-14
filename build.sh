@@ -1,14 +1,19 @@
 #!/bin/bash
 # Builds build/JustReview.app (release build).
 #
-#   VERSION=1.2.0 BUILD=57   version and build number (default: 0.0.0, commit count)
+#   VERSION=1.2.0 BUILD=57   version and build number (default: the latest release tag,
+#                            commit count)
 #   SIGN_IDENTITY="Developer ID Application: …"
 #                            sign for distribution (hardened runtime, secure timestamp);
 #                            without it the app is signed ad hoc, for local use
 set -euo pipefail
 cd "$(dirname "$0")"
 
-VERSION="${VERSION:-0.0.0}"
+# Without VERSION, the version of the latest release this commit builds on (tag v1.2.0 → 1.2.0).
+if [ -z "${VERSION:-}" ]; then
+    VERSION="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null | sed 's/^v//' || true)"
+    VERSION="${VERSION:-0.0.0}"
+fi
 BUILD="${BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 
 swift build -c release --product JustReview

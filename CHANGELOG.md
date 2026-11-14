@@ -11,6 +11,11 @@ All notable changes to JustReview. The format follows
 - Images are shown in the History tab and with Show All Changes too, the version before and
   after the change next to each other, instead of "Binary file, not shown."
 
+### Fixed
+
+- An app built from source with `just build` shows the version of the latest release in the
+  About window, instead of 0.0.0.
+
 ## [1.3.0] - 2026-11-14
 
 ### Added
