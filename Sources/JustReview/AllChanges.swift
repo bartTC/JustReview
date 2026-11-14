@@ -183,7 +183,7 @@ struct AllChangesView: View {
         let path = file.change.path
         let blame = model.allBlameRows[file.id]
         if file.diff.isBinary {
-            note("Binary file, not shown.")
+            BinaryPreview(root: model.root, change: file.change, inline: true)
         } else if file.diff.unified.isEmpty {
             note(DiffDetailView.summary(file.diff.notes, change: file.change))
         } else {

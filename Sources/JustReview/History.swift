@@ -183,7 +183,7 @@ struct CommitDetailView: View {
                         ForEach(commit.files) { file in
                             Section {
                                 if !collapsed.value.contains(file.id) {
-                                    fileContent(file, gutter: gutter)
+                                    fileContent(file, gutter: gutter, commit: commit)
                                 }
                             } header: {
                                 DiffFileHeader(file: file, collapsed: collapsed.value.contains(file.id)) {
@@ -217,9 +217,10 @@ struct CommitDetailView: View {
     }
 
     @ViewBuilder
-    private func fileContent(_ file: CommitFile, gutter: CGFloat) -> some View {
+    private func fileContent(_ file: CommitFile, gutter: CGFloat, commit: RenderedCommit) -> some View {
         if file.diff.isBinary {
-            note("Binary file, not shown.")
+            BinaryPreview(root: model.root, change: file.change,
+                          commit: (commit.hash, commit.parents.first), inline: true)
         } else if file.diff.unified.isEmpty {
             note(DiffDetailView.summary(file.diff.notes, change: file.change))
         } else {

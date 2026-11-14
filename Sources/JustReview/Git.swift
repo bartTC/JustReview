@@ -269,6 +269,13 @@ extension Git {
         return r.text
     }
 
+    /// A file's content at a revision as raw bytes (for binary files such as images), or nil if
+    /// it doesn't exist there.
+    static func showData(_ path: String, at rev: String, in root: URL) -> Data? {
+        guard let r = try? run(["show", "\(rev):\(path)"], in: root), r.status == 0 else { return nil }
+        return r.data
+    }
+
     /// `--name-status -z` output as file changes (renames/copies carry their old path).
     static func parseNameStatus(_ text: String) -> [FileChange] {
         var changes: [FileChange] = []

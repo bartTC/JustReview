@@ -4,6 +4,13 @@ All notable changes to JustReview. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Images are shown in the History tab and with Show All Changes too, the version before and
+  after the change next to each other, instead of "Binary file, not shown."
+
 ## [1.3.0] - 2026-11-14
 
 ### Added
