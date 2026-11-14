@@ -997,6 +997,18 @@ enum DiffLines {
     static let space = "diffLines"
 }
 
+/// Shades every line of a blame run (lines from the same commit) while any of its blame cells
+/// is hovered — the same shade as hovering a line.
+private struct BlameRunHighlight: ViewModifier {
+    @ObservedObject var hover: BlameHover
+    let run: Int?
+
+    func body(content: Content) -> some View {
+        content.overlay(Color.primary.opacity(run != nil && hover.run == run ? 0.06 : 0)
+            .allowsHitTesting(false))
+    }
+}
+
 /// Orange bar at the left edge of a line that belongs to a range note.
 private struct RangeMarker: View {
     let visible: Bool
@@ -1043,6 +1055,7 @@ private struct BlameCellView: View {
             Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1)
         }
         .contentShape(Rectangle())
+        .onHover { model.blameHover.hover(cell?.run, inside: $0) }
         .onTapGesture { if opensCommit, let cell { model.showCommit(cell.line.commit) } }
         .help(cell.map { blame in
             "\(blame.line.summary)\n\(blame.line.author), "
@@ -1096,6 +1109,7 @@ struct UnifiedRowView: View {
                     .modifier(AnnotatableLine(model: model, target: target, text: row.text))
                 }
                 .fixedSize(horizontal: false, vertical: true) // the blame cell takes the line's height
+                .modifier(BlameRunHighlight(hover: model.blameHover, run: blame?.run))
 
                 ForEach(annotatable ? model.notesEnding(path: path, key: key) : []) { note in
                     AnnotationNoteView(annotation: note,
@@ -1134,6 +1148,7 @@ struct SplitRowView: View {
                     SideCellView(model: model, path: path, rowID: row.id, column: 2, cell: row.right, gutter: gutter)
                 }
                 .fixedSize(horizontal: false, vertical: true) // both halves take the taller height
+                .modifier(BlameRunHighlight(hover: model.blameHover, run: blame?.run))
 
                 if annotatable { notes.padding(.leading, blameWidth ?? 0) }
             }

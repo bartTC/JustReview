@@ -10,6 +10,7 @@ All notable changes to JustReview. The format follows
 
 - Back and Forward (⌘[ / ⌘], or the arrows in the toolbar) step through the files and commits
   you looked at, so after clicking a name in the blame column you can return to the file.
+- Hovering a name in the blame column highlights every line from that commit.
 
 ## [1.1.0] - 2026-11-13
 

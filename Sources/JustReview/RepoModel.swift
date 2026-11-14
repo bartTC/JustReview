@@ -74,6 +74,7 @@ final class RepoModel: ObservableObject {
     }
     /// The blame column's content for the shown diff, by row.
     @Published private(set) var blameRows: BlameRows?
+    let blameHover = BlameHover()
     private var blameCache: [String: [Int: BlameLine]] = [:]
     private var blameGeneration = 0
     @Published var error: String?
@@ -432,9 +433,27 @@ struct FileBlame {
 /// from the same commit.
 struct BlameCell: Equatable {
     let line: BlameLine
+    /// The run this line belongs to (row id of its first line).
+    let run: Int
     let startsRun: Bool
     /// A run starting right below another one (gets a separator line).
     let followsRun: Bool
+}
+
+/// The blame run under the pointer. Kept apart from `RepoModel` so hovering only redraws the
+/// rows, not everything observing the model.
+@MainActor
+final class BlameHover: ObservableObject {
+    @Published private(set) var run: Int?
+
+    /// The pointer entered (or left) a blame cell of `run`.
+    func hover(_ run: Int?, inside: Bool) {
+        if inside, let run {
+            if self.run != run { self.run = run }
+        } else if self.run != nil, self.run == run || run == nil {
+            self.run = nil
+        }
+    }
 }
 
 /// The blame column for a rendered diff, by row id, for each layout.
@@ -480,6 +499,7 @@ extension RepoModel {
 
     /// Shows a commit on the History tab (clicking a name in the blame column).
     func showCommit(_ hash: String) {
+        blameHover.hover(nil, inside: false) // the column goes away without a hover-exit
         sidebarTab = .history
         selectedCommit = hash
     }
@@ -487,6 +507,7 @@ extension RepoModel {
     /// Matches the blame to the rendered diff's rows: context and removed lines by their HEAD
     /// line number; added lines and hunk headers have none and end a run.
     fileprivate func updateBlameRows() {
+        blameHover.hover(nil, inside: false) // rows were replaced; run ids may now mean other lines
         guard let rendered, let blame, rendered.changeID == blame.changeID else {
             if blameRows != nil { blameRows = nil }
             return
@@ -494,13 +515,16 @@ extension RepoModel {
         func cells(_ rows: [(id: Int, oldLine: Int?)]) -> [Int: BlameCell] {
             var result: [Int: BlameCell] = [:]
             var previous: String?
+            var run = 0
             for row in rows {
                 guard let number = row.oldLine, let line = blame.lines[number] else {
                     previous = nil
                     continue
                 }
                 let starts = line.commit != previous
-                result[row.id] = BlameCell(line: line, startsRun: starts, followsRun: starts && previous != nil)
+                if starts { run = row.id }
+                result[row.id] = BlameCell(line: line, run: run, startsRun: starts,
+                                           followsRun: starts && previous != nil)
                 previous = line.commit
             }
             return result
