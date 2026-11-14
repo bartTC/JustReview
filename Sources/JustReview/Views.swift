@@ -8,6 +8,15 @@ struct ContentView: View {
     @AppStorage("diffMode") private var mode: DiffMode = .unified
     @AppStorage("wrapLines") private var wrapLines = true
     @AppStorage(RepoModel.showBlameKey) private var showBlame = false
+    @AppStorage(RepoModel.showAllChangesKey) private var showAllChanges = false
+
+    /// Every changed file on one page instead of the selected one is asked for: only on the
+    /// Changes tab. (A change too large for one page is still shown file by file.)
+    private var allChangesWanted: Bool {
+        showsChrome && showAllChanges && model.sidebarTab == .changes
+    }
+
+    private var allChangesShown: Bool { allChangesWanted && !model.tooManyChanges }
 
     /// The diff with its toolbar items. They're declared on the detail column itself so they
     /// (and the spacer pushing the buttons right) land in the detail part of the toolbar.
@@ -15,8 +24,13 @@ struct ContentView: View {
         Group {
             if showsChrome && model.sidebarTab == .history {
                 CommitDetailView(model: model, mode: mode)
+            } else if allChangesShown {
+                AllChangesView(model: model, mode: mode)
             } else {
-                DiffDetailView(model: model, mode: mode, showsFileList: showsChrome)
+                VStack(spacing: 0) {
+                    if allChangesWanted { TooManyChangesNotice() }
+                    DiffDetailView(model: model, mode: mode, showsFileList: showsChrome)
+                }
             }
         }
         .toolbar {
@@ -38,6 +52,15 @@ struct ContentView: View {
                 }
                 .pickerStyle(.segmented)
                 .help("Stacked (⌘1) / Side by side (⌘2)")
+
+                if showsChrome {
+                    Toggle(isOn: $showAllChanges) {
+                        Label("Show All Changes", systemImage: "rectangle.stack")
+                    }
+                    .toggleStyle(.button)
+                    .help("Show the changes of all files on one page (⇧⌘A)")
+                    .disabled(model.sidebarTab != .changes)
+                }
 
                 Toggle(isOn: $wrapLines) {
                     Label("Wrap Lines", systemImage: "arrow.turn.down.left")
@@ -105,6 +128,7 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await model.refresh() }
         }
+        .onChange(of: allChangesWanted, initial: true) { model.setShowsAllChanges(allChangesWanted) }
     }
 }
 
@@ -115,6 +139,25 @@ extension ContentView {
             return model.commits.first { $0.id == model.selectedCommit }?.subject ?? model.repoName
         }
         return model.selection.map { ($0 as NSString).lastPathComponent } ?? model.repoName
+    }
+}
+
+/// Above the diff when Show All Changes is on but the change is too large for one page.
+private struct TooManyChangesNotice: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            Divider()
+            Label("Too many changes for one page (more than \(RepoModel.allChangesFileLimit) files or "
+                  + "\(RepoModel.allChangesLineLimit.formatted()) lines): showing one file at a time.",
+                  systemImage: "rectangle.stack")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color(nsColor: .windowBackgroundColor))
+        }
     }
 }
 
@@ -669,7 +712,7 @@ struct DiffDetailView: View {
     // MARK: Change navigation
 
     /// Rows where a run of changed lines starts, in the current layout.
-    private static func changeStarts(_ diff: RenderedDiff, layout: DiffMode) -> [Int] {
+    static func changeStarts(_ diff: RenderedDiff, layout: DiffMode) -> [Int] {
         var starts: [Int] = []
         var inChange = false
         switch layout {
@@ -960,9 +1003,9 @@ private struct AnnotatableLine: ViewModifier {
             .onGeometryChange(for: LineFrame.self) {
                 LineFrame(frame: $0.frame(in: .named(DiffLines.space)), target: target)
             } action: {
-                model.lineFrames[LineSlot(rowID: target.rowID, column: target.column)] = $0
+                model.lineFrames[LineSlot(path: target.path, rowID: target.rowID, column: target.column)] = $0
             }
-            .onDisappear { model.lineFrames[LineSlot(rowID: target.rowID, column: target.column)] = nil }
+            .onDisappear { model.lineFrames[LineSlot(path: target.path, rowID: target.rowID, column: target.column)] = nil }
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .named(DiffLines.space))
                     .onChanged { drag in
@@ -1000,7 +1043,7 @@ enum DiffLines {
 /// is hovered — the same shade as hovering a line.
 private struct BlameRunHighlight: ViewModifier {
     @ObservedObject var hover: BlameHover
-    let run: Int?
+    let run: BlameRun?
 
     func body(content: Content) -> some View {
         content.overlay(Color.primary.opacity(run != nil && hover.run == run ? 0.06 : 0)

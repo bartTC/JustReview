@@ -186,7 +186,7 @@ struct CommitDetailView: View {
                                     fileContent(file, gutter: gutter)
                                 }
                             } header: {
-                                CommitFileHeader(file: file, collapsed: collapsed.value.contains(file.id)) {
+                                DiffFileHeader(file: file, collapsed: collapsed.value.contains(file.id)) {
                                     if collapsed.value.contains(file.id) {
                                         collapsed.value.remove(file.id)
                                     } else {
@@ -255,7 +255,7 @@ extension View {
     /// Headers in the commit view: as wide as the visible area. When the content scrolls
     /// sideways (unwrapped lines), they move along so they stay in view.
     @ViewBuilder
-    fileprivate func stayInView(_ scrollsSideways: Bool, scrollX: CGFloat, viewportWidth: CGFloat) -> some View {
+    func stayInView(_ scrollsSideways: Bool, scrollX: CGFloat, viewportWidth: CGFloat) -> some View {
         if scrollsSideways {
             frame(width: max(viewportWidth - visibleScrollerWidth, 0), alignment: .leading)
                 .offset(x: scrollX)
@@ -304,11 +304,14 @@ private struct CommitMessageView: View {
     }
 }
 
-/// A file's header in a commit; stays pinned while its diff scrolls by. Click to fold it away.
-private struct CommitFileHeader: View {
+/// A file's header where several files' diffs follow one another (a commit, or all changes on
+/// one page); stays pinned while its diff scrolls by. Click to fold it away.
+struct DiffFileHeader: View {
     let file: CommitFile
     let collapsed: Bool
     let toggle: () -> Void
+    /// Where files can be annotated: whether this one has a note, and what the button does.
+    var annotation: (exists: Bool, begin: () -> Void)? = nil
 
     var body: some View {
         let change = file.change
@@ -330,6 +333,13 @@ private struct CommitFileHeader: View {
             if !file.diff.isBinary, file.diff.added + file.diff.removed > 0 {
                 Text("+\(file.diff.added)").foregroundStyle(.green)
                 Text("−\(file.diff.removed)").foregroundStyle(.red)
+            }
+            if let annotation {
+                Button(action: annotation.begin) {
+                    Image(systemName: annotation.exists ? "text.bubble.fill" : "text.bubble")
+                }
+                .buttonStyle(.borderless)
+                .help("Annotate this file")
             }
         }
         .font(.body)

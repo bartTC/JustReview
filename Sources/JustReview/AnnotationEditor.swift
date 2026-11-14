@@ -88,7 +88,7 @@ extension RepoModel {
     /// with the typed text, so there's no need to double-click. Keys typed before the editor has
     /// the focus go into it too. False when there's nothing to annotate.
     func typeIntoMarkedLines(_ text: String) -> Bool {
-        guard let anchor = markedTarget?.anchor, anchor.path == selection else { return false }
+        guard let anchor = markedTarget?.anchor, anchor.path == selection || showsAllChanges else { return false }
         beginEditing(anchor)
         guard editing?.note.anchor == anchor else { return false }
         editorDraft.text += text

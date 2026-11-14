@@ -70,6 +70,7 @@ struct AppCommands: Commands {
     @AppStorage("diffMode") private var mode: DiffMode = .unified
     @AppStorage("wrapLines") private var wrapLines = true
     @AppStorage(RepoModel.showBlameKey) private var showBlame = false
+    @AppStorage(RepoModel.showAllChangesKey) private var showAllChanges = false
     @AppStorage(DiffContext.key) private var contextLines = DiffContext.standard
     @AppStorage("annotationsCollapsed") private var annotationsCollapsed = false
 
@@ -116,6 +117,9 @@ struct AppCommands: Commands {
                 .keyboardShortcut("1")
             Button("Side by Side") { mode = .split }
                 .keyboardShortcut("2")
+            Toggle("Show All Changes", isOn: $showAllChanges)
+                .keyboardShortcut("a", modifiers: [.shift, .command])
+                .disabled(handle?.showsChrome == false || model?.sidebarTab != .changes)
             Toggle("Wrap Lines", isOn: $wrapLines)
                 .keyboardShortcut("z", modifiers: .option)
             Toggle("Show Blame", isOn: $showBlame)

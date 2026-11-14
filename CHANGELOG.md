@@ -4,6 +4,18 @@ All notable changes to JustReview. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Show All Changes (⇧⌘A, View menu or the toolbar): the Changes tab shows the changes of every
+  file on one page, one after another, instead of one file at a time. For an overview of a
+  small change that touches several files. Lines and files are annotated as usual; picking a
+  file in the list scrolls to it, a click on a file's header folds it away, and ⌥⌘↓/↑ step
+  through the changes from file to file. Show Blame works there too. Off by default. A change
+  of more than 100 files or 20,000 diff lines is shown one file at a time, with a note saying
+  so.
+
 ## [1.2.0] - 2026-11-14
 
 ### Added
@@ -93,6 +105,7 @@ The first release.
 - Settings for fonts, line height, tab width, themes and app appearance.
 - Signed with a Developer ID and notarized by Apple.
 
+[Unreleased]: https://github.com/bartTC/JustReview/compare/v1.2.0...HEAD
 [1.2.0]: https://github.com/bartTC/JustReview/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/bartTC/JustReview/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/bartTC/JustReview/releases/tag/v1.0.0

@@ -26,8 +26,10 @@ struct LineMark: Equatable {
     var end: LineTarget
 }
 
-/// A line row in the diff: its row and column (0 stacked; 1, 2 the halves of side by side).
+/// A line row in the diff: its file, row and column (0 stacked; 1, 2 the halves of side by
+/// side).
 struct LineSlot: Hashable {
+    let path: String
     let rowID: Int
     let column: Int
 }
@@ -99,7 +101,7 @@ extension RepoModel {
         guard let origin = lineDown?.target else { return }
         lineDown?.time = .distantPast // a drag is not the first click of a double-click
         guard let hit = lineFrames.first(where: { slot, line in
-            slot.column == origin.column && line.target.path == origin.path
+            slot.column == origin.column && slot.path == origin.path
                 && line.frame.minY <= location.y && location.y < line.frame.maxY
         })?.value.target else { return }
         if hit.sameLine(origin) || rangeTarget(from: origin, to: hit) != nil {

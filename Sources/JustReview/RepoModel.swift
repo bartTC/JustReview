@@ -144,6 +144,26 @@ final class RepoModel: ObservableObject {
         }
     }
     @Published private(set) var renderedCommit: RenderedCommit?
+
+    // MARK: All changes on one page
+
+    static let showAllChangesKey = "showAllChanges"
+    /// The Changes tab is to show every changed file's diff on one page instead of the selected
+    /// file's (View → Show All Changes). The window says so, see `ContentView`: it's off on
+    /// the other tabs and in a file's own window.
+    @Published private(set) var wantsAllChanges = false
+    /// The change is too large for one page (see `loadAllChanges`): one file at a time is shown
+    /// until it's smaller again.
+    @Published private(set) var tooManyChanges = false
+    /// Every changed file's diff is shown on one page.
+    var showsAllChanges: Bool { wantsAllChanges && !tooManyChanges }
+    /// Every changed file's diff, in list order, while they're shown on one page; nil until
+    /// loaded.
+    @Published private(set) var allChanges: [CommitFile]?
+    private var allChangesGeneration = 0
+    /// The blame column of each file shown on one page, by file (while "Show Blame" is on).
+    @Published private(set) var allBlameRows: [String: BlameRows] = [:]
+    private var allBlameGeneration = 0
     @Published private(set) var commitError: String?
     private var commitGeneration = 0
 
@@ -218,6 +238,7 @@ final class RepoModel: ObservableObject {
             mark = nil
             changes = []
             rendered = nil
+            allChanges = nil
             didInitialSelection = false
             selection = select
             commits = []
@@ -284,6 +305,7 @@ final class RepoModel: ObservableObject {
                 if selection == nil { selection = changes.first?.id }
             }
             loadDiff() // the shown file may have changed on disk
+            loadAllChanges()
             if historyLoaded { await loadHistory() } // new commits, checkouts
             await validateAnnotations(changes: changes, root: root)
         } catch {
@@ -294,6 +316,7 @@ final class RepoModel: ObservableObject {
     /// Renders again after a display setting changed (theme, tab width, highlighting).
     func reloadDiff() {
         loadDiff()
+        loadAllChanges()
         if selectedCommit != nil { loadCommit() }
     }
 
@@ -377,6 +400,97 @@ extension RepoModel {
     /// needs both versions read from git).
     nonisolated private static let highlightFileLimit = 100
 
+    /// Turns the one-page view of all changes on or off. An open editor is saved: its line
+    /// may not be shown in the other view.
+    func setShowsAllChanges(_ on: Bool) {
+        guard on != wantsAllChanges else { return }
+        saveEditing()
+        mark = nil
+        wantsAllChanges = on
+        tooManyChanges = false
+        allChanges = nil
+        allChangesGeneration += 1
+        if on { loadAllChanges() } else { loadAllBlame() }
+    }
+
+    /// One page is for an overview of a small change. More files or diff lines than this are
+    /// shown one file at a time: every refresh would run git and highlight for each file.
+    nonisolated static let allChangesFileLimit = 100
+    nonisolated static let allChangesLineLimit = 20_000
+
+    /// The change became too large for one page, or small enough again.
+    private func setTooManyChanges(_ tooMany: Bool) {
+        guard tooMany != tooManyChanges else { return }
+        saveEditing() // its line may not be shown in the other view
+        mark = nil
+        tooManyChanges = tooMany
+        if tooMany {
+            allChanges = nil
+            loadAllBlame()
+        }
+    }
+
+    /// Renders every changed file for the one-page view. Files whose diff is the same as last
+    /// time keep their rows, and nothing is published when no file changed (cheap refreshes).
+    fileprivate func loadAllChanges() {
+        guard wantsAllChanges, let root else { return }
+        allChangesGeneration += 1
+        let generation = allChangesGeneration
+        let changes = self.changes
+        guard changes.count <= Self.allChangesFileLimit else {
+            setTooManyChanges(true)
+            return
+        }
+        let previous = allChanges ?? []
+        let tabWidth = FontPrefs.currentTabWidth
+        let syntaxEnabled = UserDefaults.standard.object(forKey: "syntaxHighlighting") as? Bool ?? true
+        let context = DiffContext.current
+        let isDark = ThemePrefs.systemIsDark
+        let theme = ThemeStore.shared.theme(named: ThemePrefs.name(dark: isDark))
+        let styledScopes = ThemeStore.shared.theme(named: ThemePrefs.name(dark: false)).syntaxScopes
+            .union(ThemeStore.shared.theme(named: ThemePrefs.name(dark: true)).syntaxScopes)
+        Task {
+            let result = await Task.detached { () -> Result<[CommitFile]?, TooManyChanges> in
+                let highlight = syntaxEnabled
+                let old = Dictionary(previous.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+                var changed = previous.map(\.change) != changes
+                // The diffs first: too many lines are not rendered at all.
+                var lines = 0
+                var raws: [String] = []
+                for change in changes {
+                    let raw = (try? Git.diff(for: change, in: root, context: context)) ?? ""
+                    lines += raw.utf8.reduce(0) { $1 == UInt8(ascii: "\n") ? $0 + 1 : $0 }
+                    guard lines <= Self.allChangesLineLimit else { return .failure(TooManyChanges()) }
+                    raws.append(raw)
+                }
+                let files = zip(changes, raws).map { change, raw -> CommitFile in
+                    if let was = old[change.id], was.change == change, was.diff.rawText == raw,
+                       was.diff.tabWidth == tabWidth, was.diff.syntaxEnabled == highlight,
+                       was.diff.themeName == theme.name { return was }
+                    changed = true
+                    let syntax = highlight ? Self.syntax(for: change, in: root, styledScopes: styledScopes) : .none
+                    let diff = DiffRenderer.render(raw, changeID: change.id, tabWidth: tabWidth,
+                                                   showHunkHeaders: context != DiffContext.wholeFile,
+                                                   syntax: syntax, syntaxEnabled: highlight,
+                                                   styler: ThemeStyler(theme: theme), dark: isDark)
+                    return CommitFile(change: change, diff: diff)
+                }
+                return .success(changed ? files : nil)
+            }.value
+            guard generation == allChangesGeneration, wantsAllChanges else { return }
+            switch result {
+            case .failure:
+                setTooManyChanges(true)
+            case .success(let files):
+                setTooManyChanges(false)
+                if let files { allChanges = files } else if allChanges == nil { allChanges = previous }
+                loadAllBlame()
+            }
+        }
+    }
+
+    private struct TooManyChanges: Error {}
+
     fileprivate func loadCommit() {
         commitGeneration += 1
         let generation = commitGeneration
@@ -439,21 +553,27 @@ struct FileBlame {
 /// from the same commit.
 struct BlameCell: Equatable {
     let line: BlameLine
-    /// The run this line belongs to (row id of its first line).
-    let run: Int
+    /// The run this line belongs to.
+    let run: BlameRun
     let startsRun: Bool
     /// A run starting right below another one (gets a separator line).
     let followsRun: Bool
+}
+
+/// A run of lines from the same commit: its file and the row id of its first line.
+struct BlameRun: Hashable {
+    let file: String
+    let row: Int
 }
 
 /// The blame run under the pointer. Kept apart from `RepoModel` so hovering only redraws the
 /// rows, not everything observing the model.
 @MainActor
 final class BlameHover: ObservableObject {
-    @Published private(set) var run: Int?
+    @Published private(set) var run: BlameRun?
 
     /// The pointer entered (or left) a blame cell of `run`.
-    func hover(_ run: Int?, inside: Bool) {
+    func hover(_ run: BlameRun?, inside: Bool) {
         if inside, let run {
             if self.run != run { self.run = run }
         } else if self.run != nil, self.run == run || run == nil {
@@ -463,7 +583,7 @@ final class BlameHover: ObservableObject {
 }
 
 /// The blame column for a rendered diff, by row id, for each layout.
-struct BlameRows {
+struct BlameRows: Equatable {
     let changeID: String
     let unified: [Int: BlameCell]
     let split: [Int: BlameCell]
@@ -479,6 +599,7 @@ extension RepoModel {
 
     /// Loads blame for the shown file (HEAD version), from the cache when HEAD hasn't moved.
     func loadBlame() {
+        loadAllBlame()
         blameGeneration += 1
         let generation = blameGeneration
         guard UserDefaults.standard.bool(forKey: Self.showBlameKey), let root, let change = selectedChange,
@@ -518,27 +639,62 @@ extension RepoModel {
             if blameRows != nil { blameRows = nil }
             return
         }
+        blameRows = Self.blameRows(for: rendered, lines: blame.lines)
+    }
+
+    /// The blame column for a diff's rows, from the blame of the file's HEAD version.
+    nonisolated private static func blameRows(for diff: RenderedDiff, lines: [Int: BlameLine]) -> BlameRows {
         func cells(_ rows: [(id: Int, oldLine: Int?)]) -> [Int: BlameCell] {
             var result: [Int: BlameCell] = [:]
             var previous: String?
-            var run = 0
+            var run = BlameRun(file: diff.changeID, row: 0)
             for row in rows {
-                guard let number = row.oldLine, let line = blame.lines[number] else {
+                guard let number = row.oldLine, let line = lines[number] else {
                     previous = nil
                     continue
                 }
                 let starts = line.commit != previous
-                if starts { run = row.id }
+                if starts { run = BlameRun(file: diff.changeID, row: row.id) }
                 result[row.id] = BlameCell(line: line, run: run, startsRun: starts,
                                            followsRun: starts && previous != nil)
                 previous = line.commit
             }
             return result
         }
-        blameRows = BlameRows(
-            changeID: rendered.changeID,
-            unified: cells(rendered.unified.map { ($0.id, $0.header == nil ? $0.oldNo : nil) }),
-            split: cells(rendered.split.map { ($0.id, $0.header == nil ? $0.left?.number : nil) }))
+        return BlameRows(
+            changeID: diff.changeID,
+            unified: cells(diff.unified.map { ($0.id, $0.header == nil ? $0.oldNo : nil) }),
+            split: cells(diff.split.map { ($0.id, $0.header == nil ? $0.left?.number : nil) }))
+    }
+
+    /// Blame for every file shown on one page (those that exist at HEAD), from the cache where
+    /// HEAD hasn't moved.
+    func loadAllBlame() {
+        allBlameGeneration += 1
+        let generation = allBlameGeneration
+        guard showsAllChanges, UserDefaults.standard.bool(forKey: Self.showBlameKey), let root,
+              let files = allChanges?.filter({ $0.change.hasBase }), !files.isEmpty else {
+            if !allBlameRows.isEmpty { allBlameRows = [:] }
+            return
+        }
+        Task {
+            guard let head = await Task.detached(operation: { Git.headHash(in: root) }).value else { return }
+            func key(_ file: CommitFile) -> String { head + ":" + (file.change.oldPath ?? file.change.path) }
+            let missing = files.filter { blameCache[key($0)] == nil }.map { $0.change.oldPath ?? $0.change.path }
+            let loaded = await Task.detached { missing.map { ($0, Git.blame($0, at: head, in: root)) } }.value
+            if blameCache.count + loaded.count > 300 {
+                blameCache = blameCache.filter { entry in files.contains { key($0) == entry.key } }
+            }
+            for (path, lines) in loaded { blameCache[head + ":" + path] = lines }
+            guard generation == allBlameGeneration, root == self.root else { return }
+            var rows: [String: BlameRows] = [:]
+            for file in files {
+                if let lines = blameCache[key(file)] { rows[file.id] = Self.blameRows(for: file.diff, lines: lines) }
+            }
+            guard rows != allBlameRows else { return }
+            blameHover.hover(nil, inside: false) // rows were replaced; runs may now mean other lines
+            allBlameRows = rows
+        }
     }
 }
 

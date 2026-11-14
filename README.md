@@ -13,6 +13,8 @@ macOS 15 or later on Apple Silicon.
 - **Everything that changed:** staged, unstaged and untracked files, shown as a tree.
 - **Stacked or side-by-side diffs** with changed words highlighted and optional line wrapping,
   just the changed parts or the whole file.
+- **All changes on one page:** Show All Changes (⇧⌘A) lists every file's changes one after
+  another, for an overview of a small change that touches several files.
 - **Annotations for your LLM:** double-click any line, or a file's name, to add an annotation —
   or click a line and just start typing. It's written right under the line; Return or a
   click anywhere else saves it, Esc cancels.
@@ -67,6 +69,7 @@ Choose **JustReview → Install Command Line Tool…** to get the `jrev` command
 | ⌥⌘↓ / ⌥⌘↑ | Next / previous change (continues into the next file) |
 | ⌥⌘→ / ⌥⌘← | Next / previous file |
 | ⌘1 / ⌘2 | Stacked / side by side |
+| ⇧⌘A | Show all changes on one page |
 | ⌥Z | Wrap lines |
 | ⌥⌘B | Show blame |
 | ⌃⌘1 / ⌃⌘2 / ⌃⌘3 | Changes / all files / history |

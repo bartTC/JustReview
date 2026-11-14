@@ -131,9 +131,11 @@ extension RepoModel {
         return annotations.contains { $0.path == path && $0.endLine != nil && $0.anchor.covers(key) }
     }
 
-    /// The lines of the shown diff, when it's this file's.
+    /// The lines of the shown diff, when it's this file's (or one of the files, with all
+    /// changes on one page).
     func shownLineTexts(of path: String) -> [LineKey: String]? {
-        rendered?.changeID == path ? rendered?.lineTexts : nil
+        if showsAllChanges { return allChanges?.first { $0.change.path == path }?.diff.lineTexts }
+        return rendered?.changeID == path ? rendered?.lineTexts : nil
     }
 
     func removeAnnotation(_ annotation: Annotation) {
