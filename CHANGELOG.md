@@ -16,6 +16,11 @@ All notable changes to JustReview. The format follows
   of more than 100 files or 20,000 diff lines is shown one file at a time, with a note saying
   so.
 
+### Fixed
+
+- The app icon is no longer shown smaller on a light tile in the Dock and Finder on macOS 26
+  and later.
+
 ## [1.2.0] - 2026-11-14
 
 ### Added

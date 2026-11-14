@@ -8,6 +8,20 @@ default:
 build:
     ./build.sh
 
+# Compile Resources/AppIcon.icon (Icon Composer) into Resources/Assets.car; needs Xcode 26 or later
+icon:
+    #!/bin/bash
+    set -euo pipefail
+    xcode="$(ls -d /Applications/Xcode*.app | tail -1)"
+    out="$(mktemp -d)"
+    DEVELOPER_DIR="$xcode/Contents/Developer" xcrun actool Resources/AppIcon.icon --compile "$out" \
+        --app-icon AppIcon --enable-on-demand-resources NO --development-region en \
+        --target-device mac --platform macosx --minimum-deployment-target 15.0 \
+        --output-partial-info-plist "$out/partial.plist" >/dev/null
+    cp "$out/Assets.car" Resources/Assets.car
+    rm -rf "$out"
+    echo "Wrote Resources/Assets.car"
+
 # Store notarization credentials in the keychain (once)
 notary-setup:
     xcrun notarytool store-credentials justreview
