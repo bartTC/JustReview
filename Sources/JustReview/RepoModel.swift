@@ -106,6 +106,7 @@ final class RepoModel: ObservableObject {
             guard oldValue != selection else { return }
             mark = nil
             loadDiff()
+            noteLocationChange()
         }
     }
 
@@ -121,6 +122,7 @@ final class RepoModel: ObservableObject {
             mark = nil
             // Unchanged files are only listed (and kept up to date) on the Files tab.
             if oldValue == .files || sidebarTab == .files { Task { await refresh() } }
+            noteLocationChange()
         }
     }
     /// The newest commits, loaded once the History tab is first shown.
@@ -130,11 +132,23 @@ final class RepoModel: ObservableObject {
     var historyHasMore: Bool { commits.count >= historyLimit }
     /// The commit shown in the diff area on the History tab.
     @Published var selectedCommit: String? {
-        didSet { if oldValue != selectedCommit { loadCommit() } }
+        didSet {
+            guard oldValue != selectedCommit else { return }
+            loadCommit()
+            noteLocationChange()
+        }
     }
     @Published private(set) var renderedCommit: RenderedCommit?
     @Published private(set) var commitError: String?
     private var commitGeneration = 0
+
+    // MARK: Back/forward history
+
+    /// Places shown in the diff area, oldest first (see `goBack()`).
+    @Published private(set) var backForward: [NavLocation] = []
+    /// The entry of `backForward` currently shown.
+    @Published private(set) var backForwardIndex = -1
+    fileprivate var locationRecordScheduled = false
 
     func loadHistory() async {
         guard let root else { return }
@@ -193,6 +207,8 @@ final class RepoModel: ObservableObject {
             let top = try await Task.detached { try Git.toplevel(for: url) }.value
             root = top
             error = nil
+            backForward = []
+            backForwardIndex = -1
             changes = []
             rendered = nil
             didInitialSelection = false
@@ -531,5 +547,98 @@ final class AnnotationStore: ObservableObject {
         } else if let data = try? JSONEncoder().encode(annotations) {
             UserDefaults.standard.set(data, forKey: key)
         }
+    }
+}
+
+// MARK: - Back/forward
+
+/// A place in the back/forward history: a file or a commit, and the sidebar tab it was shown on.
+struct NavLocation: Equatable {
+    enum Target: Equatable {
+        case file(String)
+        case commit(String)
+    }
+
+    var tab: SidebarTab
+    var target: Target
+}
+
+extension RepoModel {
+    private static let backForwardLimit = 200
+
+    /// What the diff area shows now (nil while nothing is picked).
+    var currentLocation: NavLocation? {
+        if sidebarTab == .history {
+            return selectedCommit.map { NavLocation(tab: .history, target: .commit($0)) }
+        }
+        return selection.map { NavLocation(tab: sidebarTab, target: .file($0)) }
+    }
+
+    var canGoBack: Bool { backForwardIndex > 0 }
+    var canGoForward: Bool { backForwardIndex < backForward.count - 1 }
+
+    /// Shows the previous place (⌘[), skipping files that no longer exist.
+    func goBack() {
+        step(by: -1)
+    }
+
+    /// Shows the next place (⌘]) after going back.
+    func goForward() {
+        step(by: 1)
+    }
+
+    private func step(by delta: Int) {
+        var index = backForwardIndex + delta
+        while let location = backForward[safe: index] {
+            if isAvailable(location) {
+                backForwardIndex = index
+                show(location)
+                return
+            }
+            index += delta
+        }
+        NSSound.beep()
+    }
+
+    private func show(_ location: NavLocation) {
+        sidebarTab = location.tab
+        switch location.target {
+        case .file(let path): selection = path
+        case .commit(let hash): selectedCommit = hash
+        }
+    }
+
+    /// A file that's neither changed (deleted files count) nor on disk can't be shown any more.
+    private func isAvailable(_ location: NavLocation) -> Bool {
+        guard case .file(let path) = location.target, let root else { return true }
+        return changes.contains { $0.path == path } || unchanged.contains { $0.path == path }
+            || FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path)
+    }
+
+    /// Records the shown place once the current action is done, so a jump that sets the tab and
+    /// then the commit (a blame click) is one step, not two.
+    fileprivate func noteLocationChange() {
+        guard !locationRecordScheduled else { return }
+        locationRecordScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            locationRecordScheduled = false
+            recordLocation()
+        }
+    }
+
+    private func recordLocation() {
+        guard let location = currentLocation else { return }
+        if let current = backForward[safe: backForwardIndex], current.target == location.target {
+            // Same file on the other file tab (Changes/Files): not a step of its own.
+            if current.tab != location.tab { backForward[backForwardIndex] = location }
+            return
+        }
+        backForward.removeSubrange((backForwardIndex + 1)...)
+        backForward.append(location)
+        if backForward.count > Self.backForwardLimit {
+            backForward.removeFirst(backForward.count - Self.backForwardLimit)
+        }
+        backForwardIndex = backForward.count - 1
     }
 }

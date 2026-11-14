@@ -140,6 +140,13 @@ struct AppCommands: Commands {
         }
         CommandMenu("Navigate") {
             let inHistory = model?.sidebarTab == .history
+            Button("Back") { model?.goBack() }
+                .keyboardShortcut("[")
+                .disabled(handle?.showsChrome == false || !(model?.canGoBack ?? false))
+            Button("Forward") { model?.goForward() }
+                .keyboardShortcut("]")
+                .disabled(handle?.showsChrome == false || !(model?.canGoForward ?? false))
+            Divider()
             Button("Next Change") { model?.changeJump = ChangeJump(forward: true) }
                 .keyboardShortcut(.downArrow, modifiers: [.option, .command])
                 .disabled(inHistory)

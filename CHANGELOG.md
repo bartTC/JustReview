@@ -4,6 +4,13 @@ All notable changes to JustReview. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Back and Forward (⌘[ / ⌘], or the arrows in the toolbar) step through the files and commits
+  you looked at, so after clicking a name in the blame column you can return to the file.
+
 ## [1.1.0] - 2026-11-13
 
 ### Added

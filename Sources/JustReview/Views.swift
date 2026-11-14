@@ -20,6 +20,9 @@ struct ContentView: View {
             }
         }
         .toolbar {
+            if showsChrome {
+                ToolbarItem(placement: .navigation) { BackForwardButtons(model: model) }
+            }
             if #available(macOS 26, *) {
                 ToolbarItem(placement: .navigation) { RepoTitle(model: model) }
                     .sharedBackgroundVisibility(.hidden)
@@ -112,6 +115,23 @@ extension ContentView {
             return model.commits.first { $0.id == model.selectedCommit }?.subject ?? model.repoName
         }
         return model.selection.map { ($0 as NSString).lastPathComponent } ?? model.repoName
+    }
+}
+
+/// Back/forward through the files and commits shown (⌘[ / ⌘]), like Finder and Xcode.
+private struct BackForwardButtons: View {
+    @ObservedObject var model: RepoModel
+
+    var body: some View {
+        ControlGroup {
+            Button { model.goBack() } label: { Label("Back", systemImage: "chevron.left") }
+                .help("Back (⌘[)")
+                .disabled(!model.canGoBack)
+            Button { model.goForward() } label: { Label("Forward", systemImage: "chevron.right") }
+                .help("Forward (⌘])")
+                .disabled(!model.canGoForward)
+        }
+        .controlGroupStyle(.navigation)
     }
 }
 
