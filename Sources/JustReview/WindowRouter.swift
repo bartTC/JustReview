@@ -187,6 +187,7 @@ struct RepoWindow: View {
             })
             .focusedSceneObject(model)
             .focusedSceneObject(handle)
+            .backForwardGestures(model: model, handle: handle)
             .onAppear {
                 handle.path = tab?.root
                 handle.showsChrome = !(tab?.standalone ?? false)
