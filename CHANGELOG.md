@@ -27,8 +27,20 @@ All notable changes to JustReview. The format follows
 - Annotations are written in an editor that opens right under the line instead of a popover.
   Return or a click anywhere else saves it (so: click a line, type, click the next line,
   type…), Esc cancels; ⇧Return starts a new line, and the text box grows as you write. The
-  text is kept while you scroll away.
+  text is kept while you scroll away, and saved when you show another file. The keys are
+  spelled out next to the buttons, and Save is off until there is something to save.
 - Typing with lines marked starts an annotation on them; no need to double-click.
+
+### Fixed
+
+- With Context Lines set above 3, an annotation on an unchanged line far from any change was
+  dropped the next time the files changed.
+- An annotation being written follows its line when the code above it changes meanwhile,
+  instead of ending up on whatever line has its number by then. When the line itself is
+  rewritten, the editor stays open on it with what you typed.
+- A note deleted in another window while its editor was open is no longer brought back by
+  closing the editor.
+- VoiceOver names the annotation editor, the notes under the lines and their delete buttons.
 
 ## [1.1.0] - 2026-11-13
 

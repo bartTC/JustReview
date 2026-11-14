@@ -531,7 +531,7 @@ struct DiffDetailView: View {
     }
 
     private func header(_ change: FileChange) -> some View {
-        let target = RepoModel.fileTarget(path: change.path)
+        let target = NoteAnchor(path: change.path)
         return HStack(spacing: 8) {
             // Double-clicking the name annotates the file, like the speech-bubble button.
             HStack(spacing: 8) {
@@ -570,13 +570,13 @@ struct DiffDetailView: View {
     /// The note on the whole file (or its open editor), shown under the file header.
     @ViewBuilder
     private func fileNote(_ change: FileChange) -> some View {
-        if let editing = model.editing, editing.path == change.path, editing.key == nil {
+        if model.editing?.note.anchor == NoteAnchor(path: change.path) {
             InlineAnnotationEditor(model: model, indent: 12) // under the file name
                 .padding(.vertical, 2)
             Divider()
         } else if let note = model.annotation(path: change.path, key: nil) {
             AnnotationNoteView(annotation: note, indent: 8,
-                               onEdit: { model.beginEditing(RepoModel.fileTarget(path: change.path)) },
+                               onEdit: { model.beginEditing(note.anchor) },
                                onDelete: { model.removeAnnotation(note) })
                 .padding(.vertical, 2)
             Divider()
@@ -931,10 +931,10 @@ private struct LineNumber: View {
 }
 
 /// Click marks a line, dragging marks several, double-click (or right-click → Annotate) opens
-/// the annotation popover for the marked lines.
+/// the annotation editor for the marked lines.
 private struct AnnotatableLine: ViewModifier {
     @ObservedObject var model: RepoModel
-    let target: EditTarget
+    let target: LineTarget
     let text: AttributedString
     @StateObject private var hovered = Box(false)
     @StateObject private var pressed = Box(false)
@@ -977,8 +977,7 @@ private struct AnnotatableLine: ViewModifier {
             )
             .contextMenu {
                 let annotating = marked ? (model.markedTarget ?? target) : target
-                Button(model.annotation(path: annotating.path, key: annotating.key,
-                                        endLine: annotating.endLine) == nil
+                Button(model.annotation(at: annotating.anchor) == nil
                        ? "Add Annotation…" : "Edit Annotation…") { model.annotate(at: target) }
                 if marked, model.markedTarget?.endLine != nil {
                     Button("Copy Lines") { model.copyMarkedCode() }
@@ -1105,7 +1104,7 @@ struct UnifiedRowView: View {
         if let hunk = row.hunk {
             HunkHeaderView(hunk: hunk, numbersWidth: (gutter + 4) * (singleNumber ? 1 : 2), markerWidth: 16)
         } else if let key = row.key {
-            let target = EditTarget(path: path, key: key, rowID: row.id, column: 0)
+            let target = LineTarget(path: path, key: key, rowID: row.id, column: 0)
             VStack(spacing: 0) {
                 let numberTint = DiffStyle.gutterText(row.kind)
                 HStack(spacing: 0) {
@@ -1140,9 +1139,7 @@ struct UnifiedRowView: View {
                             InlineAnnotationEditor(model: model, indent: lineNumberInset)
                         case .note(let note):
                             AnnotationNoteView(annotation: note, indent: indent,
-                                               onEdit: { model.beginEditing(EditTarget(path: path, key: note.key,
-                                                                                       rowID: row.id, column: 0,
-                                                                                       endLine: note.endLine)) },
+                                               onEdit: { model.beginEditing(note.anchor) },
                                                onDelete: { model.removeAnnotation(note) })
                         }
                     }
@@ -1192,27 +1189,26 @@ struct SplitRowView: View {
         let left = row.left.map { model.noteItems(path: path, key: $0.key) } ?? []
         let right = row.right.map { model.noteItems(path: path, key: $0.key) } ?? []
         if !left.isEmpty, left == right {
-            ForEach(left) { item($0, column: 1) }
+            ForEach(left) { item($0) }
         } else if !left.isEmpty || !right.isEmpty {
             HStack(alignment: .top, spacing: 0) {
-                VStack(spacing: 0) { ForEach(left) { item($0, column: 1) } }
+                VStack(spacing: 0) { ForEach(left) { item($0) } }
                     .frame(maxWidth: .infinity)
-                VStack(spacing: 0) { ForEach(right) { item($0, column: 2) } }
+                VStack(spacing: 0) { ForEach(right) { item($0) } }
                     .frame(maxWidth: .infinity)
             }
         }
     }
 
     @ViewBuilder
-    private func item(_ item: NoteItem, column: Int) -> some View {
+    private func item(_ item: NoteItem) -> some View {
         let indent = gutter + 22 + columnWidth
         switch item {
         case .editor:
             InlineAnnotationEditor(model: model, indent: lineNumberInset)
         case .note(let a):
             AnnotationNoteView(annotation: a, indent: indent,
-                               onEdit: { model.beginEditing(EditTarget(path: path, key: a.key, rowID: row.id,
-                                                                       column: column, endLine: a.endLine)) },
+                               onEdit: { model.beginEditing(a.anchor) },
                                onDelete: { model.removeAnnotation(a) })
         }
     }
@@ -1251,7 +1247,7 @@ private struct SideCellView: View {
             }
             .modifier(AnnotatableLine(
                 model: model,
-                target: EditTarget(path: path, key: cell.key, rowID: rowID, column: column),
+                target: LineTarget(path: path, key: cell.key, rowID: rowID, column: column),
                 text: cell.text))
         } else {
             DiffStyle.fillerBG

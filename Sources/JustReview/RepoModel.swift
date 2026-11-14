@@ -79,7 +79,7 @@ final class RepoModel: ObservableObject {
     private var blameGeneration = 0
     @Published var error: String?
     /// The note (line, range or file) whose inline editor is open; one at a time.
-    @Published var editing: EditTarget?
+    @Published var editing: EditSession?
     /// The open editor's text.
     let editorDraft = EditorDraft()
     /// Lines marked by clicking or dragging (to annotate together or copy).
@@ -87,7 +87,7 @@ final class RepoModel: ObservableObject {
     /// Frames of the line rows currently on screen, for finding the line under a drag.
     var lineFrames: [LineSlot: LineFrame] = [:]
     /// Mouse-down on a line: where a drag started, and when (for double-click detection).
-    var lineDown: (target: EditTarget, time: Date)?
+    var lineDown: (target: LineTarget, time: Date)?
     @Published var scrollRequest: ScrollRequest?
     /// Keyboard navigation between changes (⌥⌘↓/↑); handled by the diff view.
     @Published var changeJump: ChangeJump?
@@ -107,6 +107,8 @@ final class RepoModel: ObservableObject {
     @Published var selection: String? {
         didSet {
             guard oldValue != selection else { return }
+            // An editor left open in the file shown before is saved, like by a click elsewhere.
+            if let open = editing?.note, open.path != selection { saveEditing() }
             mark = nil
             loadDiff()
             noteLocationChange()

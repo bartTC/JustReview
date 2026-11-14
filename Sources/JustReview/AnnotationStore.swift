@@ -161,3 +161,40 @@ final class AnnotationStore: ObservableObject {
         }
     }
 }
+
+// MARK: - Copy instructions
+
+/// Text put in front of the annotations when they're copied, e.g. instructions for the LLM.
+/// Set in Settings, one per repository; kept in the app's preferences like the annotations.
+enum CopyPreamble {
+    private static let prefix = "copyPreamble:"
+
+    private static func key(_ root: String) -> String { prefix + root }
+
+    /// The repository's text, trimmed; empty when there is none.
+    static func text(for root: String) -> String {
+        (UserDefaults.standard.string(forKey: key(root)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The text as typed (Settings edits this).
+    static func raw(for root: String) -> String {
+        UserDefaults.standard.string(forKey: key(root)) ?? ""
+    }
+
+    @MainActor
+    static func set(_ text: String, for root: String) {
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            UserDefaults.standard.removeObject(forKey: key(root))
+        } else {
+            UserDefaults.standard.set(text, forKey: key(root))
+        }
+        AnnotationStore.instructionsChanged(for: root) // annotations.md starts with them
+    }
+
+    /// Repositories that have instructions saved.
+    static var repositories: [String] {
+        UserDefaults.standard.dictionaryRepresentation().keys
+            .filter { $0.hasPrefix(prefix) }
+            .map { String($0.dropFirst(prefix.count)) }
+    }
+}
