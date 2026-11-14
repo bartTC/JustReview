@@ -16,8 +16,8 @@ macOS 15 or later on Apple Silicon.
 - **Stacked or side-by-side diffs** with changed words highlighted and optional line wrapping,
   just the changed parts or the whole file.
 - **Annotations for your LLM:** double-click any line, or a file's name, to add an annotation —
-  or click a line and just start typing. It's written right under the line and stays open
-  until you save or cancel it.
+  or click a line and just start typing. It's written right under the line; Return or a
+  click anywhere else saves it, Esc cancels.
   Drag across several lines to mark them: typing or a double-click adds one annotation for all of them
   (`path:12-18`), ⌘C copies their code without line numbers.
   Copy all annotations as Markdown with one click (or ⌘C) and paste them into the LLM of your choice:

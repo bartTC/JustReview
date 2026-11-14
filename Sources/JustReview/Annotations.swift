@@ -79,6 +79,9 @@ final class EditorDraft: ObservableObject {
     /// The last request the editor acted on: an editor recreated after scrolling back into view
     /// doesn't grab the focus again.
     var handledFocus = 0
+    /// The open editor's panel while it's on screen, to tell clicks inside it from clicks
+    /// elsewhere (which save it).
+    weak var panel: NSView?
 
     func requestFocus() { focusRequest += 1 }
 }
@@ -228,14 +231,18 @@ extension RepoModel {
 
     // MARK: Inline editor
 
-    /// Opens the inline editor for a note (new or existing) and puts the focus in it. Only one
-    /// is open at a time: unsaved text in another one is discarded only after asking.
+    /// Opens the inline editor for an annotation (new or existing) and puts the focus in it.
+    /// Only one is open at a time: one open elsewhere is saved first.
     func beginEditing(_ target: EditTarget) {
         if let editing, editing.sameNote(target) {
             editorDraft.requestFocus()
             return
         }
-        guard confirmDiscardingDraft() else { return }
+        if editing != nil {
+            let marked = mark
+            saveEditing()
+            mark = marked // saving clears the mark, but it's the lines about to be annotated
+        }
         editorDraft.text = annotation(path: target.path, key: target.key, endLine: target.endLine)?.text ?? ""
         editorDraft.requestFocus()
         editing = target
@@ -267,24 +274,6 @@ extension RepoModel {
     /// Closes the editor (Cancel, Esc) without saving.
     func endEditing() {
         editing = nil
-    }
-
-    /// The open editor holds text that isn't saved.
-    private var hasUnsavedDraft: Bool {
-        guard let editing else { return false }
-        let saved = annotation(path: editing.path, key: editing.key, endLine: editing.endLine)?.text ?? ""
-        return editorDraft.text.trimmingCharacters(in: .whitespacesAndNewlines) != saved
-    }
-
-    /// True when there's no unsaved text in the open editor, or the user agreed to discard it.
-    private func confirmDiscardingDraft() -> Bool {
-        guard let editing, hasUnsavedDraft else { return true }
-        let alert = NSAlert()
-        alert.messageText = "Discard your unsaved annotation?"
-        alert.informativeText = "Your annotation on \(draft(path: editing.path, key: editing.key, endLine: editing.endLine, text: "").location) isn’t saved yet."
-        alert.addButton(withTitle: "Keep Editing")
-        alert.addButton(withTitle: "Discard").hasDestructiveAction = true
-        return alert.runModal() == .alertSecondButtonReturn
     }
 
     /// The note being edited is shown under this line (so its editor goes there).
@@ -505,8 +494,9 @@ enum CopyPreamble {
 
 // MARK: - Inline editor
 
-/// Starts a note on the marked lines when typing (see `RepoModel.typeIntoMarkedLines`).
-private struct TypeToAnnotate: ViewModifier {
+/// Window events for the annotation editor: typing with lines marked starts an annotation on
+/// them (see `RepoModel.typeIntoMarkedLines`), and a click outside the open editor saves it.
+private struct AnnotationEditorEvents: ViewModifier {
     @ObservedObject var model: RepoModel
     @ObservedObject var handle: WindowHandle
     @StateObject private var monitor = Box<Any?>(nil)
@@ -515,7 +505,7 @@ private struct TypeToAnnotate: ViewModifier {
         content
             .onAppear {
                 guard monitor.value == nil else { return }
-                monitor.value = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                monitor.value = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { event in
                     // Local monitors run on the main thread.
                     MainActor.assumeIsolated { perform(event) } ? nil : event
                 }
@@ -526,10 +516,15 @@ private struct TypeToAnnotate: ViewModifier {
             }
     }
 
-    /// True when the key went into a note.
+    /// True when the event was used up (a key typed into an annotation).
     @MainActor
     private func perform(_ event: NSEvent) -> Bool {
-        guard let window = event.window, window === handle.window, model.mark != nil,
+        guard let window = event.window, window === handle.window else { return false }
+        if event.type == .leftMouseDown {
+            saveOnClickOutside(event)
+            return false // the click goes on as usual (marks a line, picks a file, …)
+        }
+        guard model.mark != nil,
               !(window.firstResponder is NSText), // typing in a text field or the editor
               event.modifierFlags.intersection([.command, .control]).isEmpty,
               let text = event.characters, !text.isEmpty,
@@ -537,6 +532,32 @@ private struct TypeToAnnotate: ViewModifier {
               text.unicodeScalars.allSatisfy({ !$0.properties.generalCategory.isControlOrPrivate })
         else { return false }
         return model.typeIntoMarkedLines(text)
+    }
+
+    /// A click anywhere but the open editor saves it (and closes it). An editor that isn't on
+    /// screen (scrolled away, another file shown) is saved by any click.
+    @MainActor
+    private func saveOnClickOutside(_ event: NSEvent) {
+        guard model.editing != nil else { return }
+        if let panel = model.editorDraft.panel, panel.window === event.window,
+           panel.bounds.contains(panel.convert(event.locationInWindow, from: nil)) { return }
+        model.saveEditing()
+    }
+}
+
+/// Sits behind the editor's panel, so the panel's frame is known in AppKit terms (see
+/// `AnnotationEditorEvents.saveOnClickOutside`).
+private struct EditorPanelFrame: NSViewRepresentable {
+    let draft: EditorDraft
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        draft.panel = view
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        draft.panel = view
     }
 }
 
@@ -548,8 +569,8 @@ extension Unicode.GeneralCategory {
 }
 
 extension View {
-    func typeToAnnotate(model: RepoModel, handle: WindowHandle) -> some View {
-        modifier(TypeToAnnotate(model: model, handle: handle))
+    func annotationEditorEvents(model: RepoModel, handle: WindowHandle) -> some View {
+        modifier(AnnotationEditorEvents(model: model, handle: handle))
     }
 }
 
@@ -704,6 +725,7 @@ struct InlineAnnotationEditor: View {
             .padding(.vertical, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(UnfoldedPanel())
+            .background(EditorPanelFrame(draft: draft))
         }
     }
 }
