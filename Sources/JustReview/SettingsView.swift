@@ -177,6 +177,9 @@ private struct AnnotationSettings: View {
     @StateObject private var text = Box("")
     @StateObject private var window = Box<NSWindow?>(nil)
 
+    /// Height of the instructions box: four lines of the body font.
+    private static let fourLines = 4 * NSLayoutManager().defaultLineHeight(for: .systemFont(ofSize: NSFont.systemFontSize))
+
     var body: some View {
         SettingsPane {
             text.value = ""
@@ -195,7 +198,7 @@ private struct AnnotationSettings: View {
                     TextEditor(text: Binding(get: { text.value }, set: { text.value = $0; save() }))
                         .font(.body)
                         .scrollContentBackground(.hidden)
-                        .frame(height: 110)
+                        .frame(height: Self.fourLines)
                         .overlay(alignment: .topLeading) {
                             if text.value.isEmpty {
                                 Text("Below are my changes. Apply them and commit automatically.")
@@ -210,11 +213,37 @@ private struct AnnotationSettings: View {
                     Text("Put in front of the annotations when you copy them, followed by a blank line.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        // Grouped-form footers are right-aligned on macOS; these are sentences.
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Section {
+                    Text((AnnotationStore.directory(for: selected).path as NSString).abbreviatingWithTildeInPath)
+                        .font(.callout.monospaced())
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } header: {
+                    Text("Files")
+                } footer: {
+                    Text("The annotations, stored on disk to build your own workflows on.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        // Grouped-form footers are right-aligned on macOS; these are sentences.
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
                 Section {
                     Text("Open a repository to give its annotations instructions.")
                         .foregroundStyle(.secondary)
+                }
+            }
+        } accessory: {
+            if let selected = repository.value {
+                Button("Show in Finder") {
+                    let folder = AnnotationStore.directory(for: selected)
+                    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    NSWorkspace.shared.activateFileViewerSelecting([folder])
                 }
             }
         }

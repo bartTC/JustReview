@@ -96,12 +96,12 @@ final class RepoModel: ObservableObject {
     /// Briefly true after copying annotations (drives the "Copied" button state).
     @Published var justCopied = false
     var copiedResetTask: Task<Void, Never>?
-    /// Review notes, shared by all windows of this repository (see `AnnotationStore`).
+    /// Annotations, shared by all windows of this repository (see `AnnotationStore`).
     var annotations: [Annotation] {
         get { annotationStore?.annotations ?? [] }
         set { annotationStore?.annotations = newValue }
     }
-    private var annotationStore: AnnotationStore?
+    private(set) var annotationStore: AnnotationStore?
     private var annotationSubscription: AnyCancellable?
     /// The file shown in the diff area (main window: the active tab).
     @Published var selection: String? {
@@ -537,44 +537,6 @@ extension RepoModel {
             changeID: rendered.changeID,
             unified: cells(rendered.unified.map { ($0.id, $0.header == nil ? $0.oldNo : nil) }),
             split: cells(rendered.split.map { ($0.id, $0.header == nil ? $0.left?.number : nil) }))
-    }
-}
-
-/// Annotations of one repository, shared by every window showing it (main window and standalone
-/// file windows). Kept in the app's preferences — never written into the repository.
-@MainActor
-final class AnnotationStore: ObservableObject {
-    private static var stores: [String: AnnotationStore] = [:]
-
-    static func shared(for root: URL) -> AnnotationStore {
-        if let store = stores[root.path] { return store }
-        let store = AnnotationStore(root: root)
-        stores[root.path] = store
-        return store
-    }
-
-    @Published var annotations: [Annotation] {
-        didSet { save() }
-    }
-
-    private let key: String
-
-    private init(root: URL) {
-        key = "annotations:" + root.path
-        if let data = UserDefaults.standard.data(forKey: key),
-           let list = try? JSONDecoder().decode([Annotation].self, from: data) {
-            annotations = list
-        } else {
-            annotations = []
-        }
-    }
-
-    private func save() {
-        if annotations.isEmpty {
-            UserDefaults.standard.removeObject(forKey: key)
-        } else if let data = try? JSONEncoder().encode(annotations) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
     }
 }
 

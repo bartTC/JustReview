@@ -31,6 +31,12 @@ macOS 15 or later on Apple Silicon.
   dropped, so only the open points remain. Instructions you set for the repository (Settings →
   Annotations) are copied in front of the annotations, e.g. "Apply them and commit
   automatically."
+- **Annotations on disk, for your own workflows:** each repository's annotations are kept in
+  `~/Library/Application Support/JustReview/repositories/<name>-<hash>/` (Settings → Annotations
+  shows the folder). `annotations.md` is what Copy puts on the clipboard, rewritten whenever the
+  annotations change, so a script can watch it and hand it to your LLM. `annotations.json` holds
+  the annotations themselves, plus a copy of the instructions: changes to the annotations show
+  up in the app, and deleting the file clears them.
 - **History:** browse the commits and read each one's changes, every file in one view.
 - **Blame:** who last changed each line and when; click a name to see that commit.
 - **Syntax highlighting** for Python, JavaScript, TypeScript, JSON, CSS, HTML, Bash, Go, Rust,

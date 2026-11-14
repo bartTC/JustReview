@@ -434,11 +434,9 @@ extension RepoModel {
         annotations.removeAll { $0.id == annotation.id }
     }
 
-    /// The notes as Markdown, after the repository's copy instructions (if any) and a blank line.
+    /// What Copy puts on the clipboard (see `AnnotationStore.markdown`).
     var annotationsMarkdown: String {
-        let notes = annotations.map(\.markdown).joined(separator: "\n\n") + "\n"
-        let preamble = root.map { CopyPreamble.text(for: $0.path) } ?? ""
-        return preamble.isEmpty ? notes : preamble + "\n\n" + notes
+        annotationStore?.markdown ?? ""
     }
 
     /// Copies all annotations (Copy button or ⌘C) and flashes "Copied" on the button.
@@ -487,12 +485,14 @@ enum CopyPreamble {
         UserDefaults.standard.string(forKey: key(root)) ?? ""
     }
 
+    @MainActor
     static func set(_ text: String, for root: String) {
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             UserDefaults.standard.removeObject(forKey: key(root))
         } else {
             UserDefaults.standard.set(text, forKey: key(root))
         }
+        AnnotationStore.instructionsChanged(for: root) // annotations.md starts with them
     }
 
     /// Repositories that have instructions saved.

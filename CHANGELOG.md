@@ -14,6 +14,11 @@ All notable changes to JustReview. The format follows
 - Instructions for copied annotations (Settings → Annotations), one text per repository: put
   in front of the annotations when you copy them, e.g. "Below are my changes. Apply them and
   commit automatically."
+- Annotations are kept in files, one folder per repository in
+  ~/Library/Application Support/JustReview/repositories (shown in Settings → Annotations), for
+  your own workflows: annotations.md is what Copy puts on the clipboard, annotations.json the
+  annotations themselves, with a copy of the instructions. Changes to the annotations in
+  annotations.json show up in the app; deleting it clears them. Annotations kept in the app's preferences by earlier versions move there.
 - Swipe between pages on the trackpad, or a mouse's back and forward buttons, go back and
   forward too.
 
