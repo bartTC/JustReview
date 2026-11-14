@@ -4,7 +4,7 @@ All notable changes to JustReview. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.3.0] - 2026-11-14
 
 ### Added
 
@@ -111,6 +111,7 @@ The first release.
 - Signed with a Developer ID and notarized by Apple.
 
 [Unreleased]: https://github.com/bartTC/JustReview/compare/v1.2.0...HEAD
+[1.3.0]: https://github.com/bartTC/JustReview/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/bartTC/JustReview/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/bartTC/JustReview/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/bartTC/JustReview/releases/tag/v1.0.0
