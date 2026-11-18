@@ -20,6 +20,9 @@ All notable changes to JustReview. The format follows
 
 ### Fixed
 
+- A window whose remembered position lies partly off screen, e.g. after taking the laptop off
+  an external display, is moved back onto the screen when it opens, and made smaller if it
+  doesn't fit.
 - An app built from source with `just build` shows the version of the latest release in the
   About window, instead of 0.0.0.
 

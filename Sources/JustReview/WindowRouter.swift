@@ -157,11 +157,29 @@ final class WindowRouter {
 
     private func restoreFrame(_ window: NSWindow, root: String) {
         guard let string = UserDefaults.standard.string(forKey: Self.frameKey(root)) else { return }
-        let frame = NSRectFromString(string)
-        // Skip frames that are no longer on any screen (e.g. a disconnected display).
-        guard frame.width >= 400, frame.height >= 300,
-              NSScreen.screens.contains(where: { $0.visibleFrame.intersects(frame) }) else { return }
+        let saved = NSRectFromString(string)
+        guard saved.width >= 400, saved.height >= 300,
+              let frame = Self.fitted(saved, to: NSScreen.screens.map(\.visibleFrame)) else { return }
         window.setFrame(frame, display: true)
+    }
+
+    /// A remembered frame, moved (and shrunk, if it's too large) to lie wholly on the screen
+    /// most of it is on: the displays may have changed since, e.g. a laptop taken off its
+    /// external display. nil when it's on no screen at all any more (the window then opens
+    /// at the default place).
+    static func fitted(_ frame: NSRect, to screens: [NSRect]) -> NSRect? {
+        func overlap(_ screen: NSRect) -> CGFloat {
+            let shared = screen.intersection(frame)
+            return shared.isNull ? 0 : shared.width * shared.height
+        }
+        guard let screen = screens.max(by: { overlap($0) < overlap($1) }), overlap(screen) > 0 else { return nil }
+        var fitted = frame
+        fitted.size.width = min(frame.width, screen.width)
+        fitted.size.height = min(frame.height, screen.height)
+        fitted.origin.x = min(max(frame.minX, screen.minX), screen.maxX - fitted.width)
+        // Keep the title bar where it was if it fits (the y axis points up).
+        fitted.origin.y = min(max(frame.maxY - fitted.height, screen.minY), screen.maxY - fitted.height)
+        return fitted
     }
 
     private func focus(_ handle: WindowHandle) {
