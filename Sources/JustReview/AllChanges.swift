@@ -209,6 +209,8 @@ struct AllChangesView: View {
 
     // MARK: Scrolling
 
+    /// - Parameter anchor: a leading one (x = 0). Unwrapped lines make the page wider than the
+    ///   window, and any other anchor also scrolls sideways, e.g. `.top` to the page's middle.
     private func scroll(_ proxy: ScrollViewProxy, to id: some Hashable, anchor: UnitPoint) {
         DispatchQueue.main.async {
             withAnimation { proxy.scrollTo(id, anchor: anchor) }
@@ -224,7 +226,7 @@ struct AllChangesView: View {
         guard model.scrollRequest == nil, let path = model.selection, path != wasRevealed,
               files.contains(where: { $0.id == path }) else { return }
         cursor.value = .file(path)
-        scroll(proxy, to: path, anchor: .top)
+        scroll(proxy, to: path, anchor: .topLeading)
     }
 
     /// Jump to an annotated line (or file) when one is picked in the annotations pane.
@@ -235,7 +237,7 @@ struct AllChangesView: View {
         revealed.value = file.id
         cursor.value = .file(file.id)
         guard let key = request.key else {
-            scroll(proxy, to: file.id, anchor: .top)
+            scroll(proxy, to: file.id, anchor: .topLeading)
             return
         }
         let row: Int? = switch mode {
@@ -244,7 +246,7 @@ struct AllChangesView: View {
         }
         guard let row else { return }
         collapsed.value.remove(file.id)
-        scroll(proxy, to: PageRowID(path: file.id, row: row), anchor: .center)
+        scroll(proxy, to: PageRowID(path: file.id, row: row), anchor: .leading)
     }
 
     /// ⌥⌘↓/↑: the next/previous run of changed lines, from file to file.

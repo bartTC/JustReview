@@ -843,7 +843,8 @@ struct DiffDetailView: View {
         model.scrollRequest = nil
         guard let rowID else { return }
         DispatchQueue.main.async {
-            withAnimation { proxy.scrollTo(rowID, anchor: .center) }
+            // A leading anchor: `.center` would also scroll unwrapped lines sideways, to their middle.
+            withAnimation { proxy.scrollTo(rowID, anchor: .leading) }
         }
     }
 }

@@ -22,6 +22,8 @@ All notable changes to JustReview. The format follows
 
 ### Fixed
 
+- With Wrap Lines off, picking a file while Show All Changes is on, or an annotation in the
+  annotations pane, no longer scrolls the diff sideways.
 - A window whose remembered position lies partly off screen, e.g. after taking the laptop off
   an external display, is moved back onto the screen when it opens, and made smaller if it
   doesn't fit.
