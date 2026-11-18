@@ -8,6 +8,8 @@ All notable changes to JustReview. The format follows
 
 ### Added
 
+- Open Recent (File menu): the repositories opened recently, newest first, to open one again
+  with one click. They are also in the Dock icon's menu and in a window without a repository.
 - Switch Worktree: a button above the file list (and File → Switch Worktree) lists the
   repository's git worktrees with their branches. Picking one shows
   it in the same window; a worktree that already has a window gets that window brought to the

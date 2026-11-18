@@ -38,6 +38,8 @@ macOS 15 or later on Apple Silicon.
   the annotations themselves, plus a copy of the instructions: changes to the annotations show
   up in the app, and deleting the file clears them.
 - **History:** browse the commits and read each one's changes, every file in one view.
+- **Open Recent:** the repositories you reviewed lately are in the File menu and the Dock
+  icon's menu.
 - **Worktrees:** in a repository with several git worktrees, switch between them with one
   click, in the same window.
 - **Blame:** who last changed each line and when; click a name to see that commit.

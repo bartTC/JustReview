@@ -290,6 +290,7 @@ struct WorktreeMenuItems: View {
 /// The overlay for a window without a repository.
 struct NoRepositoryView: View {
     let handle: WindowHandle
+    @ObservedObject private var recents = RecentRepositories.shared
     var body: some View {
         ContentUnavailableView {
             Label("No Repository", systemImage: "folder")
@@ -297,6 +298,7 @@ struct NoRepositoryView: View {
             Text("Open a git repository, drop a folder here, or run “jrev” in a repository.")
         } actions: {
             Button("Open Repository…") { WindowRouter.shared.chooseRepository(preferring: handle) }
+            if !recents.urls.isEmpty { RecentRepositoriesMenu(handle: handle).fixedSize() }
         }
     }
 }

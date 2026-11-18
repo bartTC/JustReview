@@ -241,6 +241,7 @@ final class RepoModel: ObservableObject {
         do {
             let top = try await Task.detached { try Git.toplevel(for: url) }.value
             root = top
+            RecentRepositories.shared.note(top)
             error = nil
             backForward = []
             backForwardIndex = -1
