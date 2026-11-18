@@ -241,14 +241,14 @@ struct OpenRepositoryButton: View {
     }
 }
 
-/// The sidebar's toolbar button for switching between the repository's worktrees. Only there
-/// when the repository has more than one.
+/// The sidebar's toolbar button for switching between the repository's worktrees. Always
+/// there, also with just the one worktree, so it's where one expects it.
 struct WorktreeMenu: View {
     @ObservedObject var model: RepoModel
     let handle: WindowHandle
 
     var body: some View {
-        if model.worktrees.count > 1 {
+        if !model.worktrees.isEmpty {
             Menu {
                 WorktreeMenuItems(model: model, handle: handle)
             } label: {

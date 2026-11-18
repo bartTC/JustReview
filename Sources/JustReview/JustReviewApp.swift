@@ -89,7 +89,7 @@ struct AppCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("Open Repository…") { WindowRouter.shared.chooseRepository(preferring: handle) }
                 .keyboardShortcut("o")
-            if let model, let handle, handle.showsChrome, model.worktrees.count > 1 {
+            if let model, let handle, handle.showsChrome, !model.worktrees.isEmpty {
                 Menu("Switch Worktree") { WorktreeMenuItems(model: model, handle: handle) }
             }
             Divider()
