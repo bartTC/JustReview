@@ -39,6 +39,7 @@ struct HistoryListView: View {
         .toolbar {
             ToolbarItemGroup {
                 Spacer()
+                WorktreeMenu(model: model, handle: handle)
                 OpenRepositoryButton(handle: handle)
             }
         }

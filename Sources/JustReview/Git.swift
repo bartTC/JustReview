@@ -314,6 +314,55 @@ extension Git {
     }
 }
 
+// MARK: - Worktrees
+
+/// One working tree of a repository (`git worktree`): the main one or a linked one.
+struct Worktree: Identifiable, Hashable {
+    let path: String
+    /// The branch checked out there, or "detached at <hash>".
+    let branch: String
+
+    var id: String { path }
+    var name: String { (path as NSString).lastPathComponent }
+}
+
+extension Git {
+    /// The repository's working trees, the main one first. Empty if git can't list them.
+    static func worktrees(in root: URL) -> [Worktree] {
+        guard let r = try? run(["worktree", "list", "--porcelain", "-z"], in: root), r.status == 0 else { return [] }
+        return parseWorktrees(r.text)
+    }
+
+    /// `git worktree list --porcelain -z`: per worktree a run of NUL-terminated attributes
+    /// ("worktree <path>", "HEAD <hash>", "branch <ref>", "detached", "bare", "prunable …"), ended
+    /// by an empty one. Bare repositories have no files to show, and prunable worktrees no
+    /// folder any more: both are left out.
+    static func parseWorktrees(_ text: String) -> [Worktree] {
+        var result: [Worktree] = []
+        var path: String?, head = "", branch: String?, usable = true
+        func finish() {
+            if let path, usable {
+                result.append(Worktree(path: path, branch: branch ?? "detached at " + head.prefix(7)))
+            }
+            path = nil; head = ""; branch = nil; usable = true
+        }
+        for field in text.split(separator: "\0", omittingEmptySubsequences: false) {
+            if field.isEmpty { finish(); continue }
+            let parts = field.split(separator: " ", maxSplits: 1)
+            let value = parts.count > 1 ? String(parts[1]) : ""
+            switch parts[0] {
+            case "worktree": path = value
+            case "HEAD": head = value
+            case "branch": branch = value.hasPrefix("refs/heads/") ? String(value.dropFirst(11)) : value
+            case "bare", "prunable": usable = false
+            default: break
+            }
+        }
+        finish()
+        return result
+    }
+}
+
 // MARK: - Blame
 
 /// Who last changed a line, and in which commit.

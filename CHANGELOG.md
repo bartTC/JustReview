@@ -6,6 +6,13 @@ All notable changes to JustReview. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Switch Worktree: in a repository with more than one git worktree, a button above the file
+  list (and File → Switch Worktree) lists the worktrees with their branches. Picking one shows
+  it in the same window; a worktree that already has a window gets that window brought to the
+  front. Each worktree keeps its own annotations.
+
 ### Changed
 
 - Images are shown in the History tab and with Show All Changes too, the version before and

@@ -241,6 +241,52 @@ struct OpenRepositoryButton: View {
     }
 }
 
+/// The sidebar's toolbar button for switching between the repository's worktrees. Only there
+/// when the repository has more than one.
+struct WorktreeMenu: View {
+    @ObservedObject var model: RepoModel
+    let handle: WindowHandle
+
+    var body: some View {
+        if model.worktrees.count > 1 {
+            Menu {
+                WorktreeMenuItems(model: model, handle: handle)
+            } label: {
+                Label("Switch Worktree", systemImage: "arrow.triangle.branch")
+            }
+            .help("Switch to another worktree of this repository")
+            .accessibilityLabel("Switch Worktree")
+        }
+    }
+}
+
+/// The repository's worktrees as menu items, the shown one checked. Picking another one shows
+/// it in this window.
+struct WorktreeMenuItems: View {
+    @ObservedObject var model: RepoModel
+    let handle: WindowHandle
+
+    var body: some View {
+        ForEach(model.worktrees) { worktree in
+            Toggle(title(worktree), isOn: Binding(
+                get: { model.isCurrent(worktree) },
+                set: { on in
+                    guard on else { return }
+                    model.saveEditing() // an open annotation editor belongs to this worktree
+                    WindowRouter.shared.switchWorktree(to: worktree.path, from: handle)
+                }))
+                // The branch in a pill at the right, like next to the repository's name.
+                .badge(worktree.branch)
+        }
+    }
+
+    /// The worktree's folder name; the whole path where folders share a name.
+    private func title(_ worktree: Worktree) -> String {
+        let sharesName = model.worktrees.contains { $0.name == worktree.name && $0.path != worktree.path }
+        return sharesName ? (worktree.path as NSString).abbreviatingWithTildeInPath : worktree.name
+    }
+}
+
 /// The overlay for a window without a repository.
 struct NoRepositoryView: View {
     let handle: WindowHandle
@@ -307,6 +353,7 @@ struct FileListView: View {
         .toolbar {
             ToolbarItemGroup {
                 Spacer()
+                WorktreeMenu(model: model, handle: handle)
                 OpenRepositoryButton(handle: handle)
             }
         }

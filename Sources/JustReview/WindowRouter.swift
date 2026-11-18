@@ -108,6 +108,26 @@ final class WindowRouter {
         }
     }
 
+    /// Shows another worktree of the window's repository in that window (the worktree menu). A
+    /// worktree that already has a window gets it brought to the front instead.
+    func switchWorktree(to path: String, from handle: WindowHandle) {
+        Task {
+            let root: String
+            do {
+                root = try await Task.detached { try Git.toplevel(for: URL(fileURLWithPath: path)) }.value.path
+            } catch {
+                Self.alert("Can’t open worktree", error.localizedDescription)
+                return
+            }
+            guard root != handle.path else { return }
+            if let existing = handles.first(where: { $0 !== handle && $0.path == root && $0.showsChrome }) {
+                focus(existing)
+            } else {
+                handle.adopt(root)
+            }
+        }
+    }
+
     /// Opens one file's diff in a window of its own (⌘-click, Open in New Window).
     func openFileWindow(root: URL, file: String) {
         openWindow?(value: RepoTab(root: root.path, file: file, standalone: true))
@@ -204,7 +224,12 @@ struct RepoWindow: View {
             .onAppear {
                 handle.path = tab?.root
                 handle.showsChrome = !(tab?.standalone ?? false)
-                handle.adopt = { tab = RepoTab(root: $0) }
+                handle.adopt = { root in
+                    // A window that switches to another worktree stays where it is; an empty
+                    // one gets the repository's last size and position (see `windowOpened`).
+                    if tab != nil { tabbedFor.value = root }
+                    tab = RepoTab(root: root)
+                }
                 WindowRouter.shared.register(handle, openWindow: openWindow)
             }
             .onDisappear { WindowRouter.shared.unregister(handle) }

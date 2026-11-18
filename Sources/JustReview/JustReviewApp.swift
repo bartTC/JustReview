@@ -89,6 +89,9 @@ struct AppCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("Open Repository…") { WindowRouter.shared.chooseRepository(preferring: handle) }
                 .keyboardShortcut("o")
+            if let model, let handle, handle.showsChrome, model.worktrees.count > 1 {
+                Menu("Switch Worktree") { WorktreeMenuItems(model: model, handle: handle) }
+            }
             Divider()
             Button("Open File in Default App") {
                 if let model, let root = model.root, let path = model.selection {

@@ -62,6 +62,9 @@ extension Array {
 final class RepoModel: ObservableObject {
     @Published private(set) var root: URL?
     @Published private(set) var branch = ""
+    /// The repository's working trees (`git worktree`), the main one first; the worktree menu
+    /// switches between them.
+    @Published private(set) var worktrees: [Worktree] = []
     @Published private(set) var changes: [FileChange] = []
     /// Unchanged files, populated only while "Show All Files" is on.
     @Published private(set) var unchanged: [FileChange] = []
@@ -197,6 +200,13 @@ final class RepoModel: ObservableObject {
 
     var repoName: String { root?.lastPathComponent ?? "JustReview" }
 
+    /// Whether the window shows this worktree.
+    func isCurrent(_ worktree: Worktree) -> Bool {
+        guard let root else { return false }
+        return worktree.path == root.path
+            || URL(fileURLWithPath: worktree.path).resolvingSymlinksInPath() == root.resolvingSymlinksInPath()
+    }
+
     // MARK: Navigation
 
     /// Shows the next/previous changed file (in list order) and lands on its first or last change.
@@ -277,7 +287,7 @@ final class RepoModel: ObservableObject {
         guard let root else { return }
         do {
             let showAll = sidebarTab == .files
-            let (changes, unchanged, branch) = try await Task.detached {
+            let (changes, unchanged, branch, worktrees) = try await Task.detached {
                 let changes = try Git.changes(in: root)
                 var unchanged: [FileChange] = []
                 if showAll {
@@ -286,10 +296,11 @@ final class RepoModel: ObservableObject {
                         .filter { !changed.contains($0) }
                         .map { FileChange(status: " ", path: $0, oldPath: nil) }
                 }
-                return (changes, unchanged, Git.branch(in: root))
+                return (changes, unchanged, Git.branch(in: root), Git.worktrees(in: root))
             }.value
             guard root == self.root else { return } // repo switched meanwhile
             if self.branch != branch { self.branch = branch }
+            if self.worktrees != worktrees { self.worktrees = worktrees }
             if self.changes != changes { self.changes = changes }
             if self.unchanged != unchanged { self.unchanged = unchanged }
 
