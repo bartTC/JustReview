@@ -4,7 +4,7 @@ All notable changes to JustReview. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.4.0] - 2026-11-19
 
 ### Added
 
@@ -145,7 +145,8 @@ The first release.
 - Settings for fonts, line height, tab width, themes and app appearance.
 - Signed with a Developer ID and notarized by Apple.
 
-[Unreleased]: https://github.com/bartTC/JustReview/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/bartTC/JustReview/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/bartTC/JustReview/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/bartTC/JustReview/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/bartTC/JustReview/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/bartTC/JustReview/compare/v1.0.0...v1.1.0
