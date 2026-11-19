@@ -21,6 +21,8 @@ All notable changes to JustReview. The format follows
   file, its scroll position and its folded folders, and nothing carries over when switching
   between them. The Files tab starts with no file selected. An annotation on a file without
   changes is shown on the Files tab.
+- Changes tab: when the shown file stops being a change (reverted or committed), the first
+  change is shown instead, so the shown file is always the selected one in the list.
 - Images are shown in the History tab and with Show All Changes too, the version before and
   after the change next to each other, instead of "Binary file, not shown."
 

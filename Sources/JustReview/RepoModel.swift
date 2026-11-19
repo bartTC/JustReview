@@ -122,6 +122,17 @@ final class RepoModel: ObservableObject {
     /// The file the Changes and the Files tab each showed last. The tabs are independent: each
     /// has a file of its own, and nothing carries over from one to the other.
     private var tabSelection: [SidebarTab: String] = [:]
+    /// The window shows one file only, without the file list (a file opened in its own window).
+    private var isFileWindow = false
+
+    /// The Changes tab shows one of the changes: when the shown file stops being one (reverted,
+    /// committed), the first change is shown instead, so the shown file is always the selected
+    /// row. A file's own window keeps its file.
+    private func keepToChanges() {
+        guard sidebarTab == .changes, !isFileWindow, let selection,
+              !changes.contains(where: { $0.path == selection }) else { return }
+        self.selection = changes.first?.id
+    }
 
     // MARK: Sidebar tabs and history
 
@@ -136,6 +147,7 @@ final class RepoModel: ObservableObject {
             if oldValue != .history { tabSelection[oldValue] = selection }
             if sidebarTab != .history {
                 selection = tabSelection[sidebarTab] ?? (sidebarTab == .changes ? changes.first?.id : nil)
+                keepToChanges()
             }
             // Unchanged files are only kept up to date on the Files tab.
             if oldValue == .files || sidebarTab == .files { Task { await refresh() } }
@@ -262,6 +274,7 @@ final class RepoModel: ObservableObject {
             allChanges = nil
             didInitialSelection = false
             tabSelection = [:]
+            isFileWindow = select != nil
             selection = select
             commits = []
             historyLoaded = false
@@ -328,6 +341,7 @@ final class RepoModel: ObservableObject {
                 didInitialSelection = true
                 if selection == nil, sidebarTab != .files { selection = changes.first?.id }
             }
+            keepToChanges()
             loadDiff() // the shown file may have changed on disk
             loadAllChanges()
             if historyLoaded { await loadHistory() } // new commits, checkouts
@@ -783,6 +797,8 @@ extension RepoModel {
     /// A file that's neither changed (deleted files count) nor on disk can't be shown any more.
     private func isAvailable(_ location: NavLocation) -> Bool {
         guard case .file(let path) = location.target, let root else { return true }
+        // On the Changes tab only a change is shown.
+        if location.tab == .changes { return changes.contains { $0.path == path } }
         return changes.contains { $0.path == path }
             || (sidebarTab == .files && unchanged.contains { $0.path == path })
             || FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path)
