@@ -119,6 +119,9 @@ final class RepoModel: ObservableObject {
     }
 
     private var didInitialSelection = false
+    /// The file the Changes and the Files tab each showed last. The tabs are independent: each
+    /// has a file of its own, and nothing carries over from one to the other.
+    private var tabSelection: [SidebarTab: String] = [:]
 
     // MARK: Sidebar tabs and history
 
@@ -128,7 +131,13 @@ final class RepoModel: ObservableObject {
             guard oldValue != sidebarTab else { return }
             UserDefaults.standard.set(sidebarTab.rawValue, forKey: "sidebarTab")
             mark = nil
-            // Unchanged files are only listed (and kept up to date) on the Files tab.
+            // Each file tab shows its own file again; Changes starts with the first change,
+            // Files with none.
+            if oldValue != .history { tabSelection[oldValue] = selection }
+            if sidebarTab != .history {
+                selection = tabSelection[sidebarTab] ?? (sidebarTab == .changes ? changes.first?.id : nil)
+            }
+            // Unchanged files are only kept up to date on the Files tab.
             if oldValue == .files || sidebarTab == .files { Task { await refresh() } }
             noteLocationChange()
         }
@@ -248,9 +257,11 @@ final class RepoModel: ObservableObject {
             editing = nil
             mark = nil
             changes = []
+            unchanged = []
             rendered = nil
             allChanges = nil
             didInitialSelection = false
+            tabSelection = [:]
             selection = select
             commits = []
             historyLoaded = false
@@ -303,18 +314,19 @@ final class RepoModel: ObservableObject {
             if self.branch != branch { self.branch = branch }
             if self.worktrees != worktrees { self.worktrees = worktrees }
             if self.changes != changes { self.changes = changes }
-            if self.unchanged != unchanged { self.unchanged = unchanged }
+            // Off the Files tab its list stays as it was, to be there again when the tab is.
+            if showAll, self.unchanged != unchanged { self.unchanged = unchanged }
 
             // The shown file is gone (no longer changed and not on disk): show the first change.
             let known = Set(changes.map(\.path) + unchanged.map(\.path))
             if let selection, !known.contains(selection),
                !FileManager.default.fileExists(atPath: root.appendingPathComponent(selection).path) {
-                self.selection = changes.first?.id
+                self.selection = sidebarTab == .files ? nil : changes.first?.id
             }
-            // Show the first change when the repo is opened.
+            // Show the first change when the repo is opened (the Files tab starts with no file).
             if !didInitialSelection {
                 didInitialSelection = true
-                if selection == nil { selection = changes.first?.id }
+                if selection == nil, sidebarTab != .files { selection = changes.first?.id }
             }
             loadDiff() // the shown file may have changed on disk
             loadAllChanges()
@@ -771,7 +783,8 @@ extension RepoModel {
     /// A file that's neither changed (deleted files count) nor on disk can't be shown any more.
     private func isAvailable(_ location: NavLocation) -> Bool {
         guard case .file(let path) = location.target, let root else { return true }
-        return changes.contains { $0.path == path } || unchanged.contains { $0.path == path }
+        return changes.contains { $0.path == path }
+            || (sidebarTab == .files && unchanged.contains { $0.path == path })
             || FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path)
     }
 

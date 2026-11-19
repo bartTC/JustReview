@@ -17,11 +17,18 @@ All notable changes to JustReview. The format follows
 
 ### Changed
 
+- The Changes and the Files tab are independent of each other: each keeps its own selected
+  file, its scroll position and its folded folders, and nothing carries over when switching
+  between them. The Files tab starts with no file selected. An annotation on a file without
+  changes is shown on the Files tab.
 - Images are shown in the History tab and with Show All Changes too, the version before and
   after the change next to each other, instead of "Binary file, not shown."
 
 ### Fixed
 
+- File list: after switching between Changes and Files, or when files changed, a row of the
+  list shown before could stay drawn over another one (two names on top of each other, a
+  second row highlighted in gray). The list is now a native macOS outline view.
 - With Wrap Lines off, picking a file while Show All Changes is on, or an annotation in the
   annotations pane, no longer scrolls the diff sideways.
 - A window whose remembered position lies partly off screen, e.g. after taking the laptop off

@@ -174,6 +174,8 @@ extension RepoModel {
 
     func reveal(_ annotation: Annotation) {
         if sidebarTab == .history { sidebarTab = .changes }
+        // A file without changes is only listed on the Files tab: shown there, it's selected.
+        if sidebarTab == .changes, !changes.contains(where: { $0.path == annotation.path }) { sidebarTab = .files }
         selection = annotation.path
         scrollRequest = ScrollRequest(path: annotation.path, key: annotation.key)
     }
