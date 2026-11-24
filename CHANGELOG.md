@@ -4,6 +4,13 @@ All notable changes to JustReview. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Closing the last window no longer quits the app. It keeps running, and a click on its Dock
+  icon opens a new window.
+
 ## [1.4.0] - 2026-11-19
 
 ### Added

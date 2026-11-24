@@ -16,7 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    // Closing the last window leaves the app running; a click on the Dock icon then opens a new
+    // window (SwiftUI does that for the window group when no window is open).
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     /// Carries settings, annotations and window positions over once from earlier bundle ids:
     /// local.justreview (development builds) and local.gitdiff (when the app was called GitDiff).
