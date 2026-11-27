@@ -84,6 +84,7 @@ Choose **JustReview → Install Command Line Tool…** to get the `jrev` command
 | Return | Save the annotation being written (⇧Return for a new line) |
 | Esc | Cancel the annotation being written, or unmark lines |
 | ⌘R | Clear annotations |
+| ⌘N | New window without a repository |
 | ⌘O | Open a repository |
 | ⌥⌘O | Open the file in its default app |
 

@@ -69,6 +69,7 @@ struct AppCommands: Commands {
 
     @FocusedObject private var model: RepoModel?
     @FocusedObject private var handle: WindowHandle?
+    @Environment(\.openWindow) private var openWindow
     @AppStorage("diffMode") private var mode: DiffMode = .unified
     @AppStorage("wrapLines") private var wrapLines = true
     @AppStorage(RepoModel.showBlameKey) private var showBlame = false
@@ -89,6 +90,9 @@ struct AppCommands: Commands {
             Button("Install Command Line Tool…") { CLIInstaller.install() }
         }
         CommandGroup(replacing: .newItem) {
+            // A window without a repository (the window group's value stays nil).
+            Button("New Window") { openWindow(id: "repo") }
+                .keyboardShortcut("n")
             Button("Open Repository…") { WindowRouter.shared.chooseRepository(preferring: handle) }
                 .keyboardShortcut("o")
             RecentRepositoriesMenu(handle: handle)

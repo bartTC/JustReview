@@ -6,6 +6,10 @@ All notable changes to JustReview. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- New Window (File menu, ⌘N) opens a new window without a repository.
+
 ### Changed
 
 - Closing the last window no longer quits the app. It keeps running, and a click on its Dock
